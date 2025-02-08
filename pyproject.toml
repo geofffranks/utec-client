@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "utec_py_LF2b2w"
+<<<<<<< HEAD
 version = "0.4.1"
+=======
+version = "0.0.4"
+>>>>>>> 8a03c2f (dev branch)
 description = "A U-Home API client library."
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,7 +18,11 @@ authors = [
 dependencies = [
     "aiohttp>=3.7.4,<4.0.0"
 ]
+<<<<<<< HEAD
 requires-python = ">=3.11"
+=======
+requires-python = ">=3.10"
+>>>>>>> 8a03c2f (dev branch)
 classifiers = [
     "Programming Language :: Python :: 3.10",
     "License :: OSI Approved :: MIT License",
