@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 
 
 class HandleType(str, Enum):
@@ -18,14 +18,15 @@ class HandleType(str, Enum):
 class DeviceCapability(str, Enum):
     """Device capabilities supported by the API."""
 
-    SWITCH = "st.Switch"
-    LOCK = "st.Lock"
-    BATTERY_LEVEL = "st.BatteryLevel"
-    LOCK_USER = "st.LockUser"
-    DOOR_SENSOR = "st.DoorSensor"
-    BRIGHTNESS = "st.Brightness"
-    COLOR = "st.Color"
-    COLOR_TEMPERATURE = "st.ColorTemperature"
+    SWITCH = "st.switch"
+    LOCK = "st.lock"
+    BATTERY_LEVEL = "st.batteryLevel"
+    LOCK_USER = "st.lockUser"
+    DOOR_SENSOR = "st.doorSensor"
+    BRIGHTNESS = "st.brightness"
+    SWITCH_LEVEL = "st.switchLevel"
+    COLOR = "st.color"
+    COLOR_TEMPERATURE = "st.colorTemperature"
     HEALTH_CHECK = "st.healthCheck"
 
 
@@ -35,7 +36,7 @@ class DeviceCategory(str, Enum):
     LOCK = "SmartLock"
     PLUG = "SmartPlug"
     SWITCH = "SmartSwitch"
-    LIGHT = "Light"
+    LIGHT = "LIGHT"
     UNKNOWN = "Unknown"
 
 
@@ -49,28 +50,33 @@ class LockState(str, Enum):
 
 
 class LockMode(IntEnum):
-    """Lock mode vlaues from API."""
+    """Lock mode values from API (st.lock / lockMode attribute).
 
-    LOCKED = 1
-    UNLOCKED = 2
-    JAMMED = 3
-    UNKNOWN = 4
+    Per API spec: 0 = Normal, 1 = Passage, 2 = Locked.
+    """
 
-
-class DoorState(IntEnum):
-    """Door state values from API."""
-
-    CLOSED = 1
-    OPEN = 2
-    UNKNOWN = 3
+    NORMAL = 0
+    PASSAGE = 1
+    LOCKED = 2
 
 
-class SwitchState(IntEnum):
-    """Switch state values from API."""
+class DoorState(str, Enum):
+    """Door state values from API (st.doorSensor / sensorState attribute)."""
 
-    ON = 1
-    OFF = 2
-    UNKNOWN = 3
+    CLOSED = "Closed"
+    OPEN = "Open"
+    UNKNOWN = "Unknown"
+
+
+# SwitchState is kept for reading state values returned by the API.
+# Commands use the command name directly ("on"/"off") with no arguments,
+# per the st.switch capability spec.
+class SwitchState(str, Enum):
+    """Switch state values returned by the API."""
+
+    ON = "on"
+    OFF = "off"
+    UNKNOWN = "Unknown"
 
 
 @dataclass
@@ -79,11 +85,14 @@ class DeviceCommand:
 
     capability: str
     name: str
-    arguments: Dict[str, Any] | None = None
+    arguments: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert command to API-compatible dictionary format."""
-        command_dict = {"capability": self.capability, "name": self.name}
+        command_dict: Dict[str, Any] = {
+            "capability": self.capability,
+            "name": self.name,
+        }
         if self.arguments:
             command_dict["arguments"] = self.arguments
         return command_dict
@@ -212,9 +221,4 @@ STATE_MAP = {
     SwitchState.ON: "on",
     SwitchState.OFF: "off",
     SwitchState.UNKNOWN: "unknown",
-}
-
-# Reverse mapping for command values
-COMMAND_MAP = {
-    "switch": {"on": SwitchState.ON, "off": SwitchState.OFF},
 }
