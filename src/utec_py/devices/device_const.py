@@ -22,7 +22,7 @@ class DeviceCapability(str, Enum):
     LOCK = "st.lock"
     BATTERY_LEVEL = "st.batteryLevel"
     LOCK_USER = "st.lockUser"
-    DOOR_SENSOR = "st.doorSensor"
+    DOOR_SENSOR = "st.DoorSensor"
     BRIGHTNESS = "st.brightness"
     SWITCH_LEVEL = "st.switchLevel"
     COLOR = "st.color"

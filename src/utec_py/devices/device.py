@@ -136,6 +136,15 @@ class BaseDevice:
         """Check if the device supports a specific capability."""
         return capability in self._supported_capabilities
 
+    def _state_has_capability(self, *capabilities: str) -> bool:
+        """Return whether current state data contains one of the capabilities."""
+        if not self._state_data:
+            return False
+        return any(
+            state.get("capability") in capabilities
+            for state in self._state_data.get("states", [])
+        )
+
     def _validate_capabilities(self) -> None:
         """Validate that the device has all required capabilities.
 
