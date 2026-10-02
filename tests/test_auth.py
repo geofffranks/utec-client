@@ -4,7 +4,7 @@ import aiohttp
 import pytest
 from aioresponses import aioresponses
 
-from utec_py.auth import AbstractAuth
+from utec_client.auth import AbstractAuth
 
 
 class _FakeAuth(AbstractAuth):
@@ -23,7 +23,9 @@ async def test_headers_include_bearer_and_json_content_type():
         with aioresponses() as mock:
             mock.post("https://example.test/api", payload={"ok": True})
             resp = await auth.async_make_auth_request(
-                "POST", "https://example.test/api", json={"hi": 1},
+                "POST",
+                "https://example.test/api",
+                json={"hi": 1},
             )
             assert resp.status == 200
 

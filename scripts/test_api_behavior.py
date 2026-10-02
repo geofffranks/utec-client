@@ -13,7 +13,7 @@ Getting the token:
            logger:
              logs:
                custom_components.u_tec: debug
-               utec_py: debug
+               utec_client: debug
     2. Restart HA (or reload the u_tec integration).
     3. In HA → Settings → System → Logs, search for "Authorization".
        Copy the value after "Bearer ".
@@ -129,6 +129,7 @@ async def send_multi_command(
 # Test 1: multi-command batching
 # ---------------------------------------------------------------------------
 
+
 async def test_multi_command(session: aiohttp.ClientSession, token: str, device_id: str):
     """
     Test whether {"commands": [{on}, {setLevel: 50}]} is accepted in one call.
@@ -198,13 +199,16 @@ async def test_multi_command(session: aiohttp.ClientSession, token: str, device_
         print("  SUCCESS — batch accepted and device responded correctly.")
         print("  We can combine turn_on + set_brightness into one API call.")
     else:
-        print(f"  AMBIGUOUS — API responded 2xx but device state is switch={switch}, level={level}.")
+        print(
+            f"  AMBIGUOUS — API responded 2xx but device state is switch={switch}, level={level}."
+        )
         print("  Check device physically and re-run to confirm.")
 
 
 # ---------------------------------------------------------------------------
 # Test 2: setLevel implicit turn-on
 # ---------------------------------------------------------------------------
+
 
 async def test_implicit_turn_on(session: aiohttp.ClientSession, token: str, device_id: str):
     """
@@ -257,6 +261,7 @@ async def test_implicit_turn_on(session: aiohttp.ClientSession, token: str, devi
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 async def main():
     parser = argparse.ArgumentParser(

@@ -22,10 +22,8 @@ class AbstractAuth(ABC):
     async def async_get_access_token(self) -> str:
         """Return a valid access token (refresh if needed)."""
 
-    async def async_make_auth_request(
-        self, method, host: str, **kwargs
-    ) -> ClientResponse:
-        """Perfoms authenticated request using the clientsession passed through class init function."""
+    async def async_make_auth_request(self, method, host: str, **kwargs) -> ClientResponse:
+        """Performs authenticated request using the clientsession passed to the class init."""
         if headers := kwargs.pop("headers", {}):
             headers = dict(headers)
 

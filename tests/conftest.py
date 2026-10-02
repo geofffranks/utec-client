@@ -9,8 +9,8 @@ import aiohttp
 import pytest
 import pytest_asyncio
 
-from utec_py.api import UHomeApi
-from utec_py.auth import AbstractAuth
+from utec_client.api import UHomeApi
+from utec_client.auth import AbstractAuth
 
 
 class _FakeAuth(AbstractAuth):
@@ -85,9 +85,8 @@ def state_payload():
     def _make(device_id: str = "dev-1", states: list[dict] | None = None) -> dict:
         return {
             "id": device_id,
-            "states": states or [
-                {"capability": "st.healthCheck", "name": "status", "value": "Online"}
-            ],
+            "states": states
+            or [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
         }
 
     return _make

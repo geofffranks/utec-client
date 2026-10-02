@@ -2,7 +2,7 @@
 
 import pytest
 
-from utec_py.exceptions import (
+from utec_client.exceptions import (
     ApiError,
     AuthenticationError,
     DeviceError,
@@ -20,9 +20,12 @@ def test_auth_error_is_uhome_error():
     assert issubclass(AuthenticationError, UHomeError)
 
 
-@pytest.mark.parametrize("cls", [
-    ValidationError,
-])
+@pytest.mark.parametrize(
+    "cls",
+    [
+        ValidationError,
+    ],
+)
 def test_other_errors_subclass_uhome_error(cls):
     assert issubclass(cls, UHomeError)
 

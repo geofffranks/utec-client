@@ -1,16 +1,15 @@
 """Tests for UHomeApi — transport layer + endpoints."""
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
 from aioresponses import aioresponses
 
-from utec_py.api import UHomeApi
-from utec_py.auth import AbstractAuth
-from utec_py.const import API_BASE_URL
-from utec_py.exceptions import ApiError
+from utec_client.api import UHomeApi
+from utec_client.auth import AbstractAuth
+from utec_client.const import API_BASE_URL
+from utec_client.exceptions import ApiError
 
 
 class _FakeAuth(AbstractAuth):
@@ -207,7 +206,8 @@ async def test_validate_auth_false_on_api_error():
 async def test_async_create_request_generates_unique_message_ids():
     async with aiohttp.ClientSession() as session:
         api = UHomeApi(_FakeAuth(session))
-        from utec_py.api import ApiNamespace, ApiOperation
+        from utec_client.api import ApiNamespace, ApiOperation
+
         req1 = await api.async_create_request(ApiNamespace.DEVICE, ApiOperation.QUERY, {})
         req2 = await api.async_create_request(ApiNamespace.DEVICE, ApiOperation.QUERY, {})
         assert req1["header"]["messageId"] != req2["header"]["messageId"]
@@ -217,9 +217,12 @@ async def test_async_create_request_generates_unique_message_ids():
 async def test_async_create_request_accepts_none_parameters():
     async with aiohttp.ClientSession() as session:
         api = UHomeApi(_FakeAuth(session))
-        from utec_py.api import ApiNamespace, ApiOperation
+        from utec_client.api import ApiNamespace, ApiOperation
+
         req = await api.async_create_request(
-            ApiNamespace.DEVICE, ApiOperation.DISCOVERY, None,
+            ApiNamespace.DEVICE,
+            ApiOperation.DISCOVERY,
+            None,
         )
         assert req["payload"] is None
 
@@ -232,7 +235,7 @@ async def test_network_timeout_bubbles_up():
     async with aiohttp.ClientSession() as session:
         api = UHomeApi(_FakeAuth(session))
         with aioresponses() as mock:
-            mock.post(API_BASE_URL, exception=asyncio.TimeoutError())
+            mock.post(API_BASE_URL, exception=TimeoutError())
             with pytest.raises(asyncio.TimeoutError):
                 await api.discover_devices()
 

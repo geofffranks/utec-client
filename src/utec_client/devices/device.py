@@ -1,9 +1,9 @@
 """Base device implementation for U-Home API devices."""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
-import logging
-from typing import Any, Dict, Set
+from typing import Any
 
 from ..api import UHomeApi
 from ..exceptions import DeviceError
@@ -22,7 +22,7 @@ class DeviceInfo:
     serial_number: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeviceInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "DeviceInfo":
         """Create DeviceInfo instance from API response dictionary."""
         return cls(
             manufacturer=data.get("manufacturer", ""),
@@ -48,7 +48,7 @@ class BaseDevice:
         """
         self._api = api
         self._discovery_data = discovery_data
-        self._state_data: Dict | None = None
+        self._state_data: dict | None = None
         self._last_update: datetime | None = None
 
         # Extract required fields
@@ -64,16 +64,12 @@ class BaseDevice:
 
             # Get attributes and capabilities
             self._attributes = discovery_data.get("attributes", {})
-            self._supported_capabilities = HANDLE_TYPE_CAPABILITIES.get(
-                self._handle_type, set()
-            )
+            self._supported_capabilities = HANDLE_TYPE_CAPABILITIES.get(self._handle_type, set())
 
             self._validate_capabilities()
 
         except KeyError as err:
-            raise DeviceError(
-                f"Missing required field in discovery data: {err}"
-            ) from err
+            raise DeviceError(f"Missing required field in discovery data: {err}") from err
 
     @property
     def device_id(self) -> str:
@@ -116,7 +112,7 @@ class BaseDevice:
         return self._device_info.serial_number
 
     @property
-    def supported_capabilities(self) -> Set[str]:
+    def supported_capabilities(self) -> set[str]:
         """Get the set of supported capabilities."""
         return self._supported_capabilities
 
@@ -128,7 +124,7 @@ class BaseDevice:
         return self._get_state_value("st.healthCheck", "status") == "Online"
 
     @property
-    def attributes(self) -> Dict[str, Any]:
+    def attributes(self) -> dict[str, Any]:
         """Get device attributes."""
         return self._attributes
 
@@ -141,8 +137,7 @@ class BaseDevice:
         if not self._state_data:
             return False
         return any(
-            state.get("capability") in capabilities
-            for state in self._state_data.get("states", [])
+            state.get("capability") in capabilities for state in self._state_data.get("states", [])
         )
 
     def _validate_capabilities(self) -> None:
@@ -155,9 +150,7 @@ class BaseDevice:
         required_capabilities = HANDLE_TYPE_CAPABILITIES.get(self._handle_type, set())
         if not required_capabilities.issubset(self._supported_capabilities):
             missing = required_capabilities - self._supported_capabilities
-            raise DeviceError(
-                f"Device {self._id} missing required capabilities: {missing}"
-            )
+            raise DeviceError(f"Device {self._id} missing required capabilities: {missing}")
 
     def _get_state_value(self, capability: str, attribute: str) -> Any:
         """Get a specific state value from device state data.
@@ -182,13 +175,9 @@ class BaseDevice:
 
         for state in states:
             if state.get("capability") == capability and state.get("name") == attribute:
-                logger.debug(
-                    "Found %s.%s = %s", capability, attribute, state.get("value")
-                )
+                logger.debug("Found %s.%s = %s", capability, attribute, state.get("value"))
                 return state.get("value")
-        logger.debug(
-            "State %s.%s not found for device %s", capability, attribute, self.device_id
-        )
+        logger.debug("State %s.%s not found for device %s", capability, attribute, self.device_id)
         return None
 
     def get_state_data(self) -> dict:
@@ -215,9 +204,7 @@ class BaseDevice:
             DeviceError: If command sending fails
 
         """
-        logger.debug(
-            "Sending command %s for device ID %s", command.name, self.device_id
-        )
+        logger.debug("Sending command %s for device ID %s", command.name, self.device_id)
         try:
             await self._api.send_command(
                 self.device_id, command.capability, command.name, command.arguments
@@ -252,25 +239,17 @@ class BaseDevice:
         except Exception as err:
             raise DeviceError(f"Failed to update device state: {err}") from err
 
-    async def update_state_data(self, push_data: dict ) -> Dict[str, Any] | None:
+    async def update_state_data(self, push_data: dict) -> dict[str, Any] | None:
         """Update device data from push data"""
         if "states" in push_data:
             self._state_data = push_data
-            logger.debug(
-                "Updated device %s with push data: %s",
-                self.device_id,
-                push_data
-            )
+            logger.debug("Updated device %s with push data: %s", self.device_id, push_data)
             self._last_update = datetime.now()
         else:
-            logger.warning(
-                "Invalid push data format for device %s: %s",
-                self.device_id,
-                push_data
-            )
+            logger.warning("Invalid push data format for device %s: %s", self.device_id, push_data)
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         """Get device information for Home Assistant."""
         return {
             "identifiers": {("uhome", self.device_id)},

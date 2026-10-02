@@ -2,9 +2,9 @@
 
 import pytest
 
-from utec_py.devices.device import BaseDevice
-from utec_py.devices.device_const import DeviceCategory, HANDLE_TYPE_CAPABILITIES
-from utec_py.exceptions import DeviceError
+from utec_client.devices.device import BaseDevice
+from utec_client.devices.device_const import HANDLE_TYPE_CAPABILITIES, DeviceCategory
+from utec_client.exceptions import DeviceError
 
 
 def _make_device(discovery_dict, mock_api, handle_type="utec-switch", **overrides):
@@ -44,7 +44,8 @@ def test_init_category_unknown_enum_exists_or_raises(discovery_dict, mock_api):
 
 
 def test_supported_capabilities_sourced_from_handle_type_map(
-    discovery_dict, mock_api,
+    discovery_dict,
+    mock_api,
 ):
     dev = _make_device(discovery_dict, mock_api, handle_type="utec-switch")
     expected = HANDLE_TYPE_CAPABILITIES.get("utec-switch", set())
@@ -77,17 +78,21 @@ def test_available_false_when_no_state_data(discovery_dict, mock_api):
 
 def test_available_true_when_health_check_online(discovery_dict, mock_api, state_payload):
     dev = _make_device(discovery_dict, mock_api)
-    dev._state_data = state_payload(states=[
-        {"capability": "st.healthCheck", "name": "status", "value": "Online"},
-    ])
+    dev._state_data = state_payload(
+        states=[
+            {"capability": "st.healthCheck", "name": "status", "value": "Online"},
+        ]
+    )
     assert dev.available is True
 
 
 def test_available_false_when_health_check_offline(discovery_dict, mock_api, state_payload):
     dev = _make_device(discovery_dict, mock_api)
-    dev._state_data = state_payload(states=[
-        {"capability": "st.healthCheck", "name": "status", "value": "Offline"},
-    ])
+    dev._state_data = state_payload(
+        states=[
+            {"capability": "st.healthCheck", "name": "status", "value": "Offline"},
+        ]
+    )
     assert dev.available is False
 
 
@@ -104,26 +109,32 @@ def test_get_state_value_returns_none_when_states_empty(discovery_dict, mock_api
 
 def test_get_state_value_returns_value_when_found(discovery_dict, mock_api):
     dev = _make_device(discovery_dict, mock_api)
-    dev._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "on"},
-    ]}
+    dev._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "on"},
+        ]
+    }
     assert dev._get_state_value("st.switch", "switch") == "on"
 
 
 def test_get_state_value_returns_none_when_not_found(discovery_dict, mock_api):
     dev = _make_device(discovery_dict, mock_api)
-    dev._state_data = {"states": [
-        {"capability": "st.switchLevel", "name": "level", "value": 50},
-    ]}
+    dev._state_data = {
+        "states": [
+            {"capability": "st.switchLevel", "name": "level", "value": 50},
+        ]
+    }
     assert dev._get_state_value("st.switch", "switch") is None
 
 
 def test_get_state_data_flattens_states(discovery_dict, mock_api):
     dev = _make_device(discovery_dict, mock_api)
-    dev._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "on"},
-        {"capability": "st.switchLevel", "name": "level", "value": 80},
-    ]}
+    dev._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "on"},
+            {"capability": "st.switchLevel", "name": "level", "value": 80},
+        ]
+    }
     flat = dev.get_state_data()
     assert flat == {"st.switch": {"switch": "on"}, "st.switchLevel": {"level": 80}}
 
@@ -135,19 +146,18 @@ def test_get_state_data_empty_when_no_state(discovery_dict, mock_api):
 
 # --- Async update paths ---
 
-import pytest
-from unittest.mock import AsyncMock
-
 
 @pytest.mark.asyncio
 async def test_update_pulls_state_from_api(discovery_dict, mock_api):
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     mock_api.query_device.return_value = {
         "payload": {
-            "devices": [{
-                "id": "dev-1",
-                "states": [{"capability": "st.switch", "name": "switch", "value": "on"}],
-            }]
+            "devices": [
+                {
+                    "id": "dev-1",
+                    "states": [{"capability": "st.switch", "name": "switch", "value": "on"}],
+                }
+            ]
         }
     }
     await dev.update()
@@ -193,7 +203,7 @@ async def test_update_state_data_warns_and_skips_malformed(discovery_dict, mock_
 
 @pytest.mark.asyncio
 async def test_send_command_delegates_to_api(discovery_dict, mock_api):
-    from utec_py.devices.device_const import DeviceCommand
+    from utec_client.devices.device_const import DeviceCommand
 
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     cmd = DeviceCommand(capability="st.switch", name="on", arguments=None)
@@ -203,7 +213,7 @@ async def test_send_command_delegates_to_api(discovery_dict, mock_api):
 
 @pytest.mark.asyncio
 async def test_send_command_wraps_api_error(discovery_dict, mock_api):
-    from utec_py.devices.device_const import DeviceCommand
+    from utec_client.devices.device_const import DeviceCommand
 
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     mock_api.send_command.side_effect = RuntimeError("nope")
@@ -214,7 +224,7 @@ async def test_send_command_wraps_api_error(discovery_dict, mock_api):
 
 def test_supported_capabilities_covers_all_known_handle_types(mock_api, discovery_dict):
     """Every HandleType with a capability mapping must round-trip cleanly."""
-    from utec_py.devices.device_const import HANDLE_TYPE_CAPABILITIES
+    from utec_client.devices.device_const import HANDLE_TYPE_CAPABILITIES
 
     for handle_type, expected_caps in HANDLE_TYPE_CAPABILITIES.items():
         dev = BaseDevice(discovery_dict(handle_type=handle_type), mock_api)

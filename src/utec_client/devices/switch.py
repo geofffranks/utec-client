@@ -1,6 +1,6 @@
 """Abstraction layer for device interaction - Switch."""
 
-# src/utec_py_LF2b2w/devices/switch.py
+# src/utec-client/devices/switch.py
 
 from .device import BaseDevice
 from .device_const import DeviceCapability, DeviceCommand, SwitchState

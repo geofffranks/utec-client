@@ -1,6 +1,6 @@
 """Tests for DeviceInfo parsing."""
 
-from utec_py.devices.device import DeviceInfo
+from utec_client.devices.device import DeviceInfo
 
 
 def test_from_dict_all_fields():

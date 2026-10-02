@@ -2,7 +2,7 @@
 
 import pytest
 
-from utec_py.devices.light import Light
+from utec_client.devices.light import Light
 
 
 @pytest.fixture
@@ -12,16 +12,20 @@ def light(discovery_dict, mock_api):
 
 
 def test_is_on_true(light):
-    light._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "on"},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "on"},
+        ]
+    }
     assert light.is_on is True
 
 
 def test_is_on_false_when_off(light):
-    light._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "off"},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "off"},
+        ]
+    }
     assert light.is_on is False
 
 
@@ -30,9 +34,11 @@ def test_is_on_false_when_no_state(light):
 
 
 def test_brightness_returns_level(light):
-    light._state_data = {"states": [
-        {"capability": "st.switchLevel", "name": "level", "value": 42},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.switchLevel", "name": "level", "value": 42},
+        ]
+    }
     assert light.brightness == 42
 
 
@@ -143,9 +149,11 @@ async def test_set_rgb_color(light, mock_api):
 
 
 def test_color_temp_property_returns_value(light):
-    light._state_data = {"states": [
-        {"capability": "st.colorTemperature", "name": "temperature", "value": 4000},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.colorTemperature", "name": "temperature", "value": 4000},
+        ]
+    }
     assert light.color_temp == 4000
 
 
@@ -154,9 +162,11 @@ def test_color_temp_property_none_when_no_state(light):
 
 
 def test_rgb_color_property_returns_tuple(light):
-    light._state_data = {"states": [
-        {"capability": "st.color", "name": "color", "value": {"r": 10, "g": 20, "b": 30}},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.color", "name": "color", "value": {"r": 10, "g": 20, "b": 30}},
+        ]
+    }
     result = light.rgb_color
     assert result == (10, 20, 30)
 
@@ -166,9 +176,11 @@ def test_rgb_color_property_none_when_no_state(light):
 
 
 def test_supported_features_brightness(light):
-    light._state_data = {"states": [
-        {"capability": "st.brightness", "name": "brightness", "value": 50},
-    ]}
+    light._state_data = {
+        "states": [
+            {"capability": "st.brightness", "name": "brightness", "value": 50},
+        ]
+    }
     features = light.supported_features
     assert isinstance(features, set)
     assert "brightness" in features
@@ -181,7 +193,9 @@ def test_supported_features_empty_when_no_capabilities(light):
 
 def test_supported_features_color_and_color_temp(discovery_dict, mock_api):
     # utec-light-rgbaw has COLOR and COLOR_TEMPERATURE capabilities
-    rgbaw_light = Light(discovery_dict(handle_type="utec-light-rgbaw-br", category="LIGHT"), mock_api)
+    rgbaw_light = Light(
+        discovery_dict(handle_type="utec-light-rgbaw-br", category="LIGHT"), mock_api
+    )
     features = rgbaw_light.supported_features
     assert "color" in features
     assert "color_temp" in features

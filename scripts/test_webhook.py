@@ -59,8 +59,6 @@ Getting --device-id:
 import argparse
 import asyncio
 import json
-import sys
-import time
 from uuid import uuid4
 
 import aiohttp
@@ -75,6 +73,7 @@ ECHO_SERVICE = "https://httpbin.org/post"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _header(namespace: str, name: str) -> dict:
     return {
@@ -108,6 +107,7 @@ def _print_result(label: str, ok: bool, detail: str = ""):
 # Step 1: query-config
 # ---------------------------------------------------------------------------
 
+
 async def cmd_query_config(session: aiohttp.ClientSession, token: str):
     """Try to retrieve the webhook config U-Tec currently has on file."""
     print("\n=== Step 1: Query U-Tec push config ===\n")
@@ -138,6 +138,7 @@ async def cmd_query_config(session: aiohttp.ClientSession, token: str):
 # ---------------------------------------------------------------------------
 # Step 2: test-ha
 # ---------------------------------------------------------------------------
+
 
 async def cmd_test_ha(
     session: aiohttp.ClientSession,
@@ -170,7 +171,9 @@ async def cmd_test_ha(
     print()
 
     try:
-        async with session.post(ha_webhook_url, json=mock_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with session.post(
+            ha_webhook_url, json=mock_payload, timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
             status = resp.status
             try:
                 body = await resp.json()
@@ -204,23 +207,40 @@ async def cmd_test_ha(
 # Step 3: reachability
 # ---------------------------------------------------------------------------
 
+
 async def cmd_reachability(session: aiohttp.ClientSession, url: str):
     """Check whether a URL responds to a POST from this machine."""
     print("\n=== Step 3: URL reachability check ===\n")
     print(f"  URL: {url}")
 
-    local_indicators = ("192.168.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                        "172.2", "172.3", "homeassistant.local", "localhost", "127.")
+    local_indicators = (
+        "192.168.",
+        "10.",
+        "172.16.",
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.2",
+        "172.3",
+        "homeassistant.local",
+        "localhost",
+        "127.",
+    )
     is_local = any(ind in url for ind in local_indicators)
-    _print_result("URL looks publicly routable", not is_local,
-                  "PRIVATE ADDRESS — U-Tec servers cannot reach this" if is_local else "")
+    _print_result(
+        "URL looks publicly routable",
+        not is_local,
+        "PRIVATE ADDRESS — U-Tec servers cannot reach this" if is_local else "",
+    )
 
     try:
-        async with session.post(url, json={"test": True}, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with session.post(
+            url, json={"test": True}, timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
             _print_result("Reachable from this machine", True, f"HTTP {resp.status}")
     except aiohttp.ClientConnectorError as err:
         _print_result("Reachable from this machine", False, str(err))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _print_result("Reachable from this machine", False, "timed out after 10s")
 
     if is_local:
@@ -240,6 +260,7 @@ async def cmd_reachability(session: aiohttp.ClientSession, url: str):
 # ---------------------------------------------------------------------------
 # Step 4: live-probe
 # ---------------------------------------------------------------------------
+
 
 async def cmd_live_probe(
     session: aiohttp.ClientSession,
@@ -301,12 +322,18 @@ async def cmd_live_probe(
 
         # Toggle to the opposite state and back to generate two state change events
         opposite = "off" if original_switch == "on" else "on"
-        print(f"  Toggling {original_switch} → {opposite} → {original_switch} to trigger push events...")
+        print(
+            f"  Toggling {original_switch} → {opposite} → {original_switch} to trigger push events..."
+        )
 
         async def _switch(cmd):
             p = {
                 "header": _header("Uhome.Device", "Command"),
-                "payload": {"devices": [{"id": device_id, "command": {"capability": "st.switch", "name": cmd}}]},
+                "payload": {
+                    "devices": [
+                        {"id": device_id, "command": {"capability": "st.switch", "name": cmd}}
+                    ]
+                },
             }
             await _utec_post(session, token, p)
 
@@ -317,9 +344,9 @@ async def cmd_live_probe(
 
         print(f"\n  Waiting {wait_seconds}s for U-Tec to deliver a push to:")
         print(f"    {echo_url}")
-        print(f"  Watch that URL in your browser now for incoming requests.")
+        print("  Watch that URL in your browser now for incoming requests.")
         await asyncio.sleep(wait_seconds)
-        print(f"  Done waiting.")
+        print("  Done waiting.")
 
     # Restore original webhook
     if restore_url:
@@ -349,11 +376,16 @@ async def cmd_live_probe(
 # Step 5: trigger-and-watch
 # ---------------------------------------------------------------------------
 
-async def _ha_get(session: aiohttp.ClientSession, ha_url: str, ha_token: str, path: str) -> tuple[int, str | dict]:
+
+async def _ha_get(
+    session: aiohttp.ClientSession, ha_url: str, ha_token: str, path: str
+) -> tuple[int, str | dict]:
     """GET from HA REST API."""
     headers = {"Authorization": f"Bearer {ha_token}"}
     async with session.get(
-        f"{ha_url}{path}", headers=headers, timeout=aiohttp.ClientTimeout(total=10),
+        f"{ha_url}{path}",
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=10),
     ) as resp:
         try:
             body = await resp.json()
@@ -362,11 +394,16 @@ async def _ha_get(session: aiohttp.ClientSession, ha_url: str, ha_token: str, pa
         return resp.status, body
 
 
-async def _ha_post(session: aiohttp.ClientSession, ha_url: str, ha_token: str, path: str, data: dict) -> tuple[int, str | dict]:
+async def _ha_post(
+    session: aiohttp.ClientSession, ha_url: str, ha_token: str, path: str, data: dict
+) -> tuple[int, str | dict]:
     """POST to HA REST API."""
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     async with session.post(
-        f"{ha_url}{path}", headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=10),
+        f"{ha_url}{path}",
+        headers=headers,
+        json=data,
+        timeout=aiohttp.ClientTimeout(total=10),
     ) as resp:
         try:
             body = await resp.json()
@@ -406,7 +443,9 @@ async def cmd_trigger_and_watch(
     status, state_data = await _ha_get(session, ha_url, ha_token, f"/api/states/{entity_id}")
     if status == 404:
         print(f"  ERROR: Entity {entity_id} not found in HA.")
-        print("  List U-Tec entities with: curl -sH 'Authorization: Bearer TOKEN' http://HA:8123/api/states | python3 -c \"import json,sys;[print(e['entity_id']) for e in json.load(sys.stdin) if 'u_tec' in e.get('attributes',{}).get('integration','').lower() or 'utec' in e['entity_id'].lower()]\"")
+        print(
+            "  List U-Tec entities with: curl -sH 'Authorization: Bearer TOKEN' http://HA:8123/api/states | python3 -c \"import json,sys;[print(e['entity_id']) for e in json.load(sys.stdin) if 'u_tec' in e.get('attributes',{}).get('integration','').lower() or 'utec' in e['entity_id'].lower()]\""
+        )
         return
     if status != 200:
         print(f"  ERROR: Unexpected HTTP {status} fetching entity state")
@@ -448,19 +487,23 @@ async def cmd_trigger_and_watch(
     opposite_label = opposite_service.split("/")[1]
     restore_label = restore_service.split("/")[1]
     print(f"  Calling {opposite_service} on {entity_id} ...")
-    status, _ = await _ha_post(session, ha_url, ha_token, f"/api/services/{opposite_service}", {"entity_id": entity_id})
+    status, _ = await _ha_post(
+        session, ha_url, ha_token, f"/api/services/{opposite_service}", {"entity_id": entity_id}
+    )
     _print_result(f"Service {opposite_label} called", 200 <= status < 300, f"HTTP {status}")
 
     # Wait for the device to actually change, then restore
     await asyncio.sleep(3)
     print(f"  Calling {restore_service} on {entity_id} (restoring) ...")
-    status, _ = await _ha_post(session, ha_url, ha_token, f"/api/services/{restore_service}", {"entity_id": entity_id})
+    status, _ = await _ha_post(
+        session, ha_url, ha_token, f"/api/services/{restore_service}", {"entity_id": entity_id}
+    )
     _print_result(f"Service {restore_label} called", 200 <= status < 300, f"HTTP {status}")
     print(f"  Entity should return to: {original_state}")
 
     # Now poll HA logs for new webhook-related entries
     print(f"\n  Waiting up to {wait_seconds}s for U-Tec push notification in HA logs...")
-    print(f"  (looking for new 'webhook' + 'u_tec' log lines)\n")
+    print("  (looking for new 'webhook' + 'u_tec' log lines)\n")
 
     webhook_found = False
 
@@ -475,12 +518,13 @@ async def cmd_trigger_and_watch(
                 # Find lines that are new since our baseline snapshot
                 new_lines = [ln for ln in current_lines if ln not in baseline_lines]
                 webhook_lines = [
-                    ln for ln in new_lines
-                    if "webhook" in ln.lower() and "u_tec" in ln.lower()
+                    ln for ln in new_lines if "webhook" in ln.lower() and "u_tec" in ln.lower()
                 ]
                 if webhook_lines:
                     webhook_found = True
-                    print(f"  PUSH RECEIVED! Found {len(webhook_lines)} new webhook log entry(ies):\n")
+                    print(
+                        f"  PUSH RECEIVED! Found {len(webhook_lines)} new webhook log entry(ies):\n"
+                    )
                     for ln in webhook_lines[-10:]:
                         print(f"    {ln[:250]}")
                     break
@@ -490,7 +534,7 @@ async def cmd_trigger_and_watch(
         except aiohttp.ClientConnectorError as err:
             print(f"  ERROR: Cannot reach HA: {err}")
             break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print(f"  [{elapsed}s] Log request timed out, retrying...")
 
     if not webhook_found:
@@ -499,9 +543,9 @@ async def cmd_trigger_and_watch(
         print("    1. U-Tec is still not sending pushes (contact support again)")
         print("    2. The webhook URL registered with U-Tec is wrong/unreachable")
         print("    3. HA debug logging is off — enable it with:")
-        print('       logger:')
-        print('         logs:')
-        print('           custom_components.u_tec: debug')
+        print("       logger:")
+        print("         logs:")
+        print("           custom_components.u_tec: debug")
         print("    4. Push notifications aren't enabled in the integration options")
     else:
         print("\n  U-Tec push notifications are working!")
@@ -511,11 +555,15 @@ async def cmd_trigger_and_watch(
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Troubleshoot the U-Tec push notification webhook."
     )
-    parser.add_argument("--token", help="U-Tec OAuth2 Bearer token (required for all commands except trigger-and-watch)")
+    parser.add_argument(
+        "--token",
+        help="U-Tec OAuth2 Bearer token (required for all commands except trigger-and-watch)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # query-config
@@ -523,8 +571,11 @@ async def main():
 
     # test-ha
     p_ha = sub.add_parser("test-ha", help="POST a mock push payload to your HA webhook")
-    p_ha.add_argument("--ha-webhook-url", required=True,
-                      help="Full HA webhook URL (e.g. https://your-ha/api/webhook/u_tec_push_ENTRYID)")
+    p_ha.add_argument(
+        "--ha-webhook-url",
+        required=True,
+        help="Full HA webhook URL (e.g. https://your-ha/api/webhook/u_tec_push_ENTRYID)",
+    )
     p_ha.add_argument("--device-id", required=True, help="Device ID to include in mock payload")
     p_ha.add_argument("--secret", help="Push secret (optional; skip to test secret-less behaviour)")
 
@@ -535,22 +586,38 @@ async def main():
     # live-probe
     p_probe = sub.add_parser("live-probe", help="Register a probe endpoint and toggle a device")
     p_probe.add_argument("--device-id", required=True, help="Device to toggle")
-    p_probe.add_argument("--echo-url", default=ECHO_SERVICE,
-                         help="Public echo URL to register (default: httpbin). Use your webhook.site URL here.")
+    p_probe.add_argument(
+        "--echo-url",
+        default=ECHO_SERVICE,
+        help="Public echo URL to register (default: httpbin). Use your webhook.site URL here.",
+    )
     p_probe.add_argument("--restore-url", help="Original HA webhook URL to restore after probe")
     p_probe.add_argument("--restore-secret", help="Original push secret to restore")
-    p_probe.add_argument("--wait", type=int, default=30, help="Seconds to wait for push (default: 30)")
+    p_probe.add_argument(
+        "--wait", type=int, default=30, help="Seconds to wait for push (default: 30)"
+    )
 
     # trigger-and-watch
-    p_taw = sub.add_parser("trigger-and-watch",
-                           help="Toggle an HA entity and watch logs for the push (no U-Tec token needed)")
-    p_taw.add_argument("--entity-id", required=True,
-                       help="HA entity to toggle (e.g. switch.front_porch, light.kitchen, lock.front_door)")
-    p_taw.add_argument("--ha-url", required=True,
-                       help="HA base URL (e.g. http://homeassistant.local:8123)")
-    p_taw.add_argument("--ha-token", required=True,
-                       help="HA long-lived access token (Profile → Security → Long-Lived Access Tokens)")
-    p_taw.add_argument("--wait", type=int, default=30, help="Seconds to wait for push (default: 30)")
+    p_taw = sub.add_parser(
+        "trigger-and-watch",
+        help="Toggle an HA entity and watch logs for the push (no U-Tec token needed)",
+    )
+    p_taw.add_argument(
+        "--entity-id",
+        required=True,
+        help="HA entity to toggle (e.g. switch.front_porch, light.kitchen, lock.front_door)",
+    )
+    p_taw.add_argument(
+        "--ha-url", required=True, help="HA base URL (e.g. http://homeassistant.local:8123)"
+    )
+    p_taw.add_argument(
+        "--ha-token",
+        required=True,
+        help="HA long-lived access token (Profile → Security → Long-Lived Access Tokens)",
+    )
+    p_taw.add_argument(
+        "--wait", type=int, default=30, help="Seconds to wait for push (default: 30)"
+    )
 
     args = parser.parse_args()
 
@@ -568,14 +635,21 @@ async def main():
             await cmd_reachability(session, args.url)
         elif args.command == "live-probe":
             await cmd_live_probe(
-                session, args.token, args.device_id,
-                args.restore_url, args.restore_secret, args.wait,
+                session,
+                args.token,
+                args.device_id,
+                args.restore_url,
+                args.restore_secret,
+                args.wait,
                 args.echo_url,
             )
         elif args.command == "trigger-and-watch":
             await cmd_trigger_and_watch(
-                session, args.entity_id,
-                args.ha_url, args.ha_token, args.wait,
+                session,
+                args.entity_id,
+                args.ha_url,
+                args.ha_token,
+                args.wait,
             )
 
 

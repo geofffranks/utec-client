@@ -2,13 +2,13 @@
 
 
 def test_package_importable():
-    import utec_py  # noqa: F401
-    from utec_py.api import UHomeApi  # noqa: F401
-    from utec_py.auth import AbstractAuth  # noqa: F401
-    from utec_py.devices.device import BaseDevice, DeviceInfo  # noqa: F401
-    from utec_py.devices.switch import Switch  # noqa: F401
-    from utec_py.devices.light import Light  # noqa: F401
-    from utec_py.devices.lock import Lock  # noqa: F401
+    import utec_client  # noqa: F401
+    from utec_client.api import UHomeApi  # noqa: F401
+    from utec_client.auth import AbstractAuth  # noqa: F401
+    from utec_client.devices.device import BaseDevice, DeviceInfo  # noqa: F401
+    from utec_client.devices.light import Light  # noqa: F401
+    from utec_client.devices.lock import Lock  # noqa: F401
+    from utec_client.devices.switch import Switch  # noqa: F401
 
 
 def test_mock_api_fixture(mock_api):

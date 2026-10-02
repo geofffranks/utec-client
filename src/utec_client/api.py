@@ -1,9 +1,9 @@
 """Api class for Uhome/Utec API."""
 
-from enum import Enum
 import json
 import logging
-from typing import Any, Dict, TypedDict
+from enum import Enum
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from attr import dataclass
@@ -50,10 +50,7 @@ class UHomeApi:
         self.auth = Auth
 
     async def async_create_request(
-        self,
-        namespace: ApiNamespace,
-        operation: ApiOperation,
-        parameters: dict | None
+        self, namespace: ApiNamespace, operation: ApiOperation, parameters: dict | None
     ) -> ApiRequest:
         """Create a standardised API request."""
         header: ApiHeader = {
@@ -66,9 +63,7 @@ class UHomeApi:
 
     async def _async_make_request(self, **kwargs):
         """Make an authenticated API request."""
-        response = await self.auth.async_make_auth_request(
-            "POST", API_BASE_URL, **kwargs
-        )
+        response = await self.auth.async_make_auth_request("POST", API_BASE_URL, **kwargs)
         try:
             if response.status == 204:
                 return {}
@@ -85,21 +80,17 @@ class UHomeApi:
         """Validate authentication by making a test request."""
         try:
             await self.discover_devices()
-            return True  # noqa: TRY300
+            return True
         except ApiError:
             return False
 
-    async def discover_devices(self) -> Dict[str, Any]:
+    async def discover_devices(self) -> dict[str, Any]:
         """Discover available devices."""
         logger.debug("Discovering devices")
-        payload = await self.async_create_request(
-            ApiNamespace.DEVICE, ApiOperation.DISCOVERY, {}
-        )
+        payload = await self.async_create_request(ApiNamespace.DEVICE, ApiOperation.DISCOVERY, {})
         return await self._async_make_request(json=payload)
 
-    async def get_device_state(
-        self, device_ids: list, custom_data: dict | None
-    ) -> Dict[str, Any]:
+    async def get_device_state(self, device_ids: list, custom_data: dict | None) -> dict[str, Any]:
         """Get device status - supports multiple devices at once and custom data."""
         devices = []
         for device_id in device_ids:
@@ -108,18 +99,14 @@ class UHomeApi:
                 device["custom_data"] = custom_data
             devices.append(device)
         params = {"devices": devices}
-        payload = await self.async_create_request(
-            ApiNamespace.DEVICE, ApiOperation.QUERY, params
-        )
+        payload = await self.async_create_request(ApiNamespace.DEVICE, ApiOperation.QUERY, params)
         return await self._async_make_request(json=payload)
 
     async def query_device(self, device_id: str):
         """Query single device."""
         device = [{"id": device_id}]
         params = {"devices": device}
-        payload = await self.async_create_request(
-            ApiNamespace.DEVICE, ApiOperation.QUERY, params
-        )
+        payload = await self.async_create_request(ApiNamespace.DEVICE, ApiOperation.QUERY, params)
         logger.debug(
             "Querying device with device ID %s and payload %s",
             device_id,
@@ -128,25 +115,16 @@ class UHomeApi:
         return await self._async_make_request(json=payload)
 
     async def send_command(
-        self,
-        device_id: str,
-        capability: str,
-        command: str,
-        arguments: dict | None
-    ) -> Dict[str, Any]:
+        self, device_id: str, capability: str, command: str, arguments: dict | None
+    ) -> dict[str, Any]:
         """Send command to device."""
-        command_data: dict[str, Any] = {
-            "capability": capability,
-            "name": command
-        }
+        command_data: dict[str, Any] = {"capability": capability, "name": command}
         if arguments:
             command_data["arguments"] = arguments
 
         params = {"devices": [{"id": device_id, "command": command_data}]}
 
-        payload = await self.async_create_request(
-            ApiNamespace.DEVICE, ApiOperation.COMMAND, params
-        )
+        payload = await self.async_create_request(ApiNamespace.DEVICE, ApiOperation.COMMAND, params)
         logger.debug(
             "Sending Command %s to device %s, with payload %s",
             command,
@@ -163,8 +141,6 @@ class UHomeApi:
             access_token: OAuth2 access token sent by U-Tec with each push notification
         """
         params = {"configure": {"notification": {"access_token": access_token, "url": uri}}}
-        payload = await self.async_create_request(
-            ApiNamespace.CONFIGURE, ApiOperation.SET, params
-        )
+        payload = await self.async_create_request(ApiNamespace.CONFIGURE, ApiOperation.SET, params)
         logger.debug("Setting push update url. URL: %s", uri)
         return await self._async_make_request(json=payload)

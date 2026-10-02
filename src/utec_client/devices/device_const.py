@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 
 class HandleType(str, Enum):
@@ -85,11 +85,11 @@ class DeviceCommand:
 
     capability: str
     name: str
-    arguments: Optional[Dict[str, Any]] = None
+    arguments: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert command to API-compatible dictionary format."""
-        command_dict: Dict[str, Any] = {
+        command_dict: dict[str, Any] = {
             "capability": self.capability,
             "name": self.name,
         }
@@ -107,11 +107,11 @@ class ColorState:
     b: int  # 0-255
 
     @classmethod
-    def from_dict(cls, data: Dict[str, int]) -> "ColorState":
+    def from_dict(cls, data: dict[str, int]) -> "ColorState":
         """Create ColorState instance from dictionary."""
         return cls(r=data.get("r", 0), g=data.get("g", 0), b=data.get("b", 0))
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         """Convert color state to dictionary format."""
         return {"r": self.r, "g": self.g, "b": self.b}
 
@@ -142,7 +142,7 @@ class ColorTempRange(int):
 
 
 # Mapping of handle types to their required capabilities
-HANDLE_TYPE_CAPABILITIES: Dict[str, Set[str]] = {
+HANDLE_TYPE_CAPABILITIES: dict[str, set[str]] = {
     HandleType.UTEC_LOCK: {
         DeviceCapability.LOCK,
         DeviceCapability.BATTERY_LEVEL,
@@ -180,11 +180,9 @@ class DeviceState:
     value: Any
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeviceState":
+    def from_dict(cls, data: dict[str, Any]) -> "DeviceState":
         """Create DeviceState instance from API response dictionary."""
-        return cls(
-            capability=data["capability"], name=data["name"], value=data["value"]
-        )
+        return cls(capability=data["capability"], name=data["name"], value=data["value"])
 
 
 @dataclass
@@ -196,7 +194,7 @@ class DeviceAttributes:
     switch_type: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeviceAttributes":
+    def from_dict(cls, data: dict[str, Any]) -> "DeviceAttributes":
         """Create DeviceAttributes instance from discovery data dictionary."""
         temp_range = None
         if "colorTemperatureRange" in data:

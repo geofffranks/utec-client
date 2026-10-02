@@ -31,18 +31,19 @@ class Lock(BaseDevice):
     @property
     def has_door_sensor(self) -> bool:
         """Check if the lock has a door sensor capability."""
-        return self.has_capability(DeviceCapability.DOOR_SENSOR) or self.has_capability(
-            "st.doorSensor"
-        ) or self._state_has_capability(DeviceCapability.DOOR_SENSOR, "st.doorSensor")
+        return (
+            self.has_capability(DeviceCapability.DOOR_SENSOR)
+            or self.has_capability("st.doorSensor")
+            or self._state_has_capability(DeviceCapability.DOOR_SENSOR, "st.doorSensor")
+        )
 
     @property
     def door_state(self) -> str | None:
         """Get the door state if door sensor is present."""
         if not self.has_door_sensor:
             return None
-        return self._get_state_value(DeviceCapability.DOOR_SENSOR, "sensorState") or self._get_state_value(
-            "st.doorSensor", "sensorState"
-        )
+        door_state = self._get_state_value(DeviceCapability.DOOR_SENSOR, "sensorState")
+        return door_state or self._get_state_value("st.doorSensor", "sensorState")
 
     @property
     def lock_mode(self) -> str | None:

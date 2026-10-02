@@ -2,7 +2,7 @@
 
 import pytest
 
-from utec_py.devices.switch import Switch
+from utec_client.devices.switch import Switch
 
 
 @pytest.fixture
@@ -11,16 +11,20 @@ def switch(discovery_dict, mock_api):
 
 
 def test_is_on_true_when_state_on(switch):
-    switch._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "on"},
-    ]}
+    switch._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "on"},
+        ]
+    }
     assert switch.is_on is True
 
 
 def test_is_on_false_when_state_off(switch):
-    switch._state_data = {"states": [
-        {"capability": "st.switch", "name": "switch", "value": "off"},
-    ]}
+    switch._state_data = {
+        "states": [
+            {"capability": "st.switch", "name": "switch", "value": "off"},
+        ]
+    }
     assert switch.is_on is False
 
 

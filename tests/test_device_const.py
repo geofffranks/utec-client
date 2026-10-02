@@ -1,10 +1,9 @@
 """Tests for device_const enums and mapping."""
 
-from utec_py.devices.device_const import (
-    DeviceCapability,
+from utec_client.devices.device_const import (
+    HANDLE_TYPE_CAPABILITIES,
     DeviceCategory,
     DeviceCommand,
-    HANDLE_TYPE_CAPABILITIES,
     HandleType,
     LockState,
 )

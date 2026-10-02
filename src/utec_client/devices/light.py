@@ -1,7 +1,5 @@
 """Abstraction layer for device interaction - Light."""
-# src/utec_py_LF2b2w/devices/light.py
-
-from typing import Tuple  # noqa: UP035
+# src/utec-client/devices/light.py
 
 from .device import BaseDevice
 from .device_const import (
@@ -40,7 +38,7 @@ class Light(BaseDevice):
         return self._get_state_value(DeviceCapability.COLOR_TEMPERATURE, "temperature")
 
     @property
-    def rgb_color(self) -> Tuple[int, int, int] | None:
+    def rgb_color(self) -> tuple[int, int, int] | None:
         """Get RGB color."""
         color_data = self._get_state_value(DeviceCapability.COLOR, "color")
         if color_data:
