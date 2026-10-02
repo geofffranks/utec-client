@@ -116,8 +116,11 @@ def main() -> None:
 
     wheels = sorted(glob.glob(os.path.join(args.dist_dir, "*.whl")))
     sdists = sorted(glob.glob(os.path.join(args.dist_dir, "*.tar.gz")))
-    if not wheels or not sdists:
-        raise SystemExit(f"expected one wheel and one sdist in {args.dist_dir}")
+    if len(wheels) != 1 or len(sdists) != 1:
+        raise SystemExit(
+            f"expected exactly one wheel and one sdist in {args.dist_dir}, found "
+            f"{len(wheels)} wheel(s), {len(sdists)} sdist(s); clean the directory first"
+        )
     wheel, sdist = wheels[0], sdists[0]
 
     for artifact, label in [(wheel, "wheel"), (sdist, "sdist")]:
