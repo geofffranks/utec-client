@@ -13,7 +13,14 @@ from dataclasses import dataclass
 
 # A fork release carries this marker line in its GitHub release body. Inherited
 # upstream releases/tags never carry it, so weekly automation ignores them.
+# The marker alone is NOT sufficient eligibility (a collaborator could add it
+# to any release); see is_eligible_fork_release.
 FORK_RELEASE_MARKER = "utec-client-fork-release: true"
+
+# The commit this fork started from (base of the fork). Tags/releases whose
+# commit is not a strict descendant of this commit are inherited upstream
+# artifacts and can never be eligible fork releases, even with a marker.
+DEFAULT_FORK_BASE_COMMIT = "7a2c6c35a73b69f3fba683409fb815a79e8906fb"
 
 _STABLE_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
@@ -48,8 +55,48 @@ def version_tag(ref: str) -> str:
 
 
 def is_fork_release(release_body: str) -> bool:
-    """True when a release body carries the fork-release marker."""
+    """True when a release body carries the fork-release marker.
+
+    This is the marker check only. Eligibility additionally requires the
+    is_eligible_fork_release ancestry checks.
+    """
     return any(line.strip() == FORK_RELEASE_MARKER for line in release_body.splitlines())
+
+
+def is_eligible_fork_release(
+    *,
+    has_marker: bool,
+    base_is_ancestor: bool,
+    same_commit: bool,
+) -> bool:
+    """Decide fork-release eligibility from marker plus ancestry facts.
+
+    A release is an eligible fork release only when all of these hold:
+    - its release body carries the fork-release marker, and
+    - the fork base commit is a proper ancestor of the release's tag commit
+      (strict descendant: the tag is not the base commit itself, and every
+      inherited upstream tag predates the fork base).
+
+    Boundary: a maintainer can deliberately mark and publish a release on any
+    commit after the fork base — that is the supported way to choose an
+    intentional first baseline. But an inherited upstream tag can never pass:
+    it either predates the base or IS the base, so the strict-descendant check
+    fails regardless of any marker text added to its release body.
+    """
+    return has_marker and base_is_ancestor and not same_commit
+
+
+def previous_fork_tag(fork_releases: list[dict], current_tag: str) -> str | None:
+    """Highest eligible fork release tag strictly below current_tag, or None."""
+    current = parse_stable_version(current_tag)
+    lower = [
+        r
+        for r in fork_releases
+        if r["tag"] != version_tag(current_tag) and parse_stable_version(r["tag"]) < current
+    ]
+    if not lower:
+        return None
+    return version_tag(max(lower, key=lambda r: parse_stable_version(r["tag"]))["tag"])
 
 
 def tag_exists(tag: str, existing_tags: list[str]) -> bool:

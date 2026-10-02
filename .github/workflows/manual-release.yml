@@ -1,9 +1,12 @@
 name: Manual release
 
-# Manual dispatch accepting a custom stable version (X.Y.Z / vX.Y.Z) on main.
-# Can create the first fork release, permits intentional minor/major choices,
-# and refuses reused, lower, or invalid versions. The tag is created at the
-# current main tip; publishing then runs through the same validated path.
+# Manual dispatch accepting a custom stable version (X.Y.Z / vX.Y.Z). Always
+# validates from and releases at the tip of main (dispatching from another
+# ref is rejected: the workflow checks out main and compares the pinned HEAD
+# against the fetched origin/main tip). Can create the first fork release,
+# permits intentional minor/major choices, and refuses reused, lower, or
+# non-stable versions. The exact validated wheel and sdist are attached to
+# the GitHub release BEFORE publication.
 
 on:
   workflow_dispatch:
@@ -24,44 +27,83 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the tag and release only
+      contents: write # create the tag, release, and upload retained assets
       actions: write # explicitly dispatch the publish workflow
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           ref: main
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - name: Validate requested version against all existing tags
-        id: validate
-        env:
-          VERSION: ${{ inputs.version }}
+      - name: Validate requested version at the tip of main
+        id: pin
         run: |
-          OUT=$(python scripts/prepare_release.py manual "$VERSION")
+          git remote set-branches origin main
+          git fetch origin main
+          git checkout --detach origin/main
+          OUT=$(python scripts/prepare_release.py manual "$REQUESTED_VERSION")
           echo "$OUT"
           echo "tag=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['tag'])")" >> "$GITHUB_OUTPUT"
           echo "version=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['version'])")" >> "$GITHUB_OUTPUT"
           echo "sha=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")" >> "$GITHUB_OUTPUT"
-      - name: Create tag and release at pinned main commit
+      - name: Create tag at the pinned main commit
         env:
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+          PINNED_SHA: ${{ steps.pin.outputs.sha }}
         run: |
-          git tag "${{ steps.validate.outputs.tag }}" "${{ steps.validate.outputs.sha }}"
-          git push origin "${{ steps.validate.outputs.tag }}"
-          # The marker line identifies this as a fork release for weekly selection.
-          printf '%s\n\nManual fork release of version %s.\n' \
-            "utec-client-fork-release: true" "${{ steps.validate.outputs.version }}" > body.md
-          gh release create "${{ steps.validate.outputs.tag }}" \
-            --target "${{ steps.validate.outputs.sha }}" \
-            --title "utec-client ${{ steps.validate.outputs.version }}" \
-            --notes-file body.md
+          git tag "${RELEASE_TAG}" "${PINNED_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+      - name: Build and validate the exact tagged source
+        env:
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          git checkout --detach "refs/tags/${RELEASE_TAG}"
+          pip install -e .[dev]
+          ruff check . && ruff format --check .
+          pytest
+          python -m build
+          V=$(ls dist | grep '\.whl$'); V=${V#utec_client-}; V=${V%-py3-none-any.whl}
+          if [ "$V" != "${RELEASE_VERSION}" ]; then
+            echo "::error::built version $V != release version ${RELEASE_VERSION}"
+            exit 1
+          fi
+          python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
+      - name: Generate release notes since the previous fork release
+        env:
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+        run: python scripts/prepare_release.py notes --tag "${RELEASE_TAG}" > notes-body.md
+      - name: Create the release with the fork marker
+        env:
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          # The marker line identifies this as a fork release for weekly
+          # selection; eligibility additionally requires fork-base ancestry.
+          printf 'utec-client-fork-release: true\n\n' > release-body.md
+          cat notes-body.md >> release-body.md
+          gh release create "${RELEASE_TAG}" \
+            --verify-tag \
+            --target "${{ steps.pin.outputs.sha }}" \
+            --title "utec-client ${RELEASE_VERSION}" \
+            --notes-file release-body.md
+      - name: Attach the exact validated artifacts and checksum manifest
+        env:
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+        run: |
+          sha256sum dist/* > dist/SHA256SUMS
+          gh release upload "${RELEASE_TAG}" dist/* --repo "$GITHUB_REPOSITORY"
       - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
         env:
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.pin.outputs.version }}
         run: |
           gh workflow run publish.yml \
             --ref main \
-            -f tag="${{ steps.validate.outputs.tag }}" \
-            -f version="${{ steps.validate.outputs.version }}"
+            -f tag="${RELEASE_TAG}" \
+            -f version="${RELEASE_VERSION}"

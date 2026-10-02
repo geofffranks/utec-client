@@ -1,14 +1,20 @@
 name: Publish to PyPI
 
-# Publishes validated wheel+sdist for an exact tag using PyPI Trusted
-# Publishing (OIDC). Triggered explicitly by the weekly/manual release
-# workflows (GITHUB_TOKEN release events do not trigger workflows), by
-# workflow_dispatch for retries after partial publication, and by
-# human-created GitHub releases.
+# Publishes the exact validated wheel+sdist retained as GitHub release assets
+# BEFORE publication. The publish job never rebuilds: it downloads the
+# release assets, verifies them against the attached SHA256SUMS manifest,
+# classifies them against PyPI (read-only), uploads only missing files, then
+# performs a post-upload readback verification against PyPI.
 #
-# Inputs (workflow_dispatch / workflow_call):
-#   tag     - the release tag, e.g. v1.2.3
-#   version - the stable version, e.g. 1.2.3
+# Triggers:
+# - workflow_dispatch/workflow_call with tag+version (release workflows and
+#   safe retries after partial publication), and
+# - human-created GitHub releases (which must carry the fork-release marker;
+#   see docs/RELEASES.md).
+#
+# Security: inputs are only ever consumed through env vars (never raw shell
+# interpolation); source eligibility is validated here from trusted main
+# tooling BEFORE the release tag is checked out for anything.
 
 on:
   workflow_call:
@@ -22,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (must already exist)"
+        description: "Release tag whose retained assets should be published"
         required: true
         type: string
       version:
@@ -40,95 +46,88 @@ permissions:
   contents: read
 
 jobs:
-  validate-and-build:
-    # Runs the full check suite on the exact tagged source, then builds and
-    # verifies the artifacts. Publishing is impossible if this job fails.
+  validate-source:
+    # Trusted-main validation, before any use of the target tag contents:
+    # strict stable tag/version pair, single remote tag ref, tag commit an
+    # ancestor of origin/main, release marked as a fork release, and the tag
+    # commit a strict descendant of the fork base (inherited upstream tags
+    # can never pass, marker or not).
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
-      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.set.outputs.tag }}
+      version: ${{ steps.set.outputs.version }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Resolve tag and version
-        id: resolve
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          else
-            # Human-created release event: derive from the release.
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.resolve.outputs.tag }}
+          ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - name: Validate version/tag pair
-        run: python scripts/prepare_release.py verify --tag "${{ steps.resolve.outputs.tag }}" --version "${{ steps.resolve.outputs.version }}"
-      - run: pip install -e .[dev]
-      - run: ruff check . && ruff format --check .
-      - run: pytest
-      - run: python -m build
-      - name: Verify artifact name/version/imports/license from a clean environment
-        run: python scripts/check_artifact.py --dist-dir dist --version "${{ steps.resolve.outputs.version }}"
-      - name: Confirm built artifact version matches the release version exactly
+      - id: set
         run: |
-          V=$(basename dist/*.whl .whl); V=${V#utec_client-}; V=${V%-py3-none-any}
-          if [ "$V" != "${{ steps.resolve.outputs.version }}" ]; then
-            echo "::error::built version $V != release version ${{ steps.resolve.outputs.version }}"
-            exit 1
+          if [ -n "$DISPATCH_TAG" ]; then
+            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$DISPATCH_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
-        with:
-          name: release-dists
-          path: dist/
-          if-no-files-found: error
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - name: Validate source eligibility before any target-tag use
+        env:
+          PUBLISH_TAG: ${{ steps.set.outputs.tag }}
+          PUBLISH_VERSION: ${{ steps.set.outputs.version }}
+        run: |
+          git remote set-branches origin main
+          git fetch origin main
+          python scripts/prepare_release.py prepublish --tag "$PUBLISH_TAG" --version "$PUBLISH_VERSION"
 
-  preflight:
-    # Read-only PyPI check: distinguishes new files, files already published
-    # with identical hashes (a previous retry succeeded), and conflicts.
+  pypi-publish:
     runs-on: ubuntu-latest
-    needs: validate-and-build
-    outputs:
-      proceed: ${{ steps.check.outputs.proceed }}
+    needs: validate-source
+    permissions:
+      id-token: write # the only job with publishing authority (OIDC)
+      contents: read
+    environment:
+      name: pypi-publish
+      url: https://pypi.org/p/utec-client/
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH_TAG: ${{ needs.validate-source.outputs.tag }}
+      PUBLISH_VERSION: ${{ needs.validate-source.outputs.version }}
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.validate-and-build.outputs.tag }}
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+          ref: main
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317 # v4.6.0
-        with:
-          name: release-dists
-          path: dist/
-      - id: check
+      - name: Download retained release assets
+        run: |
+          mkdir -p dist
+          gh release download "$PUBLISH_TAG" --repo "$GITHUB_REPOSITORY" --dir dist
+          ls -la dist
+      - name: Verify assets against the retained SHA256SUMS manifest
+        run: python scripts/verify_assets.py --dir dist --manifest dist/SHA256SUMS
+      - name: Read-only PyPI preflight (new / identical / conflict) and staging of new files
+        id: preflight
         run: |
           set +e
-          python scripts/pypi_preflight.py --dist-dir dist
+          python scripts/pypi_preflight.py --dist-dir dist --staging-dir staging
           code=$?
           if [ "$code" = 0 ]; then echo "proceed=true" >> "$GITHUB_OUTPUT"
           elif [ "$code" = 3 ]; then echo "proceed=false" >> "$GITHUB_OUTPUT"
           else exit 1; fi
-
-  pypi-publish:
-    runs-on: ubuntu-latest
-    needs: [validate-and-build, preflight]
-    if: needs.preflight.outputs.proceed == 'true'
-    permissions:
-      id-token: write # the only job with publishing authority (OIDC)
-    environment:
-      name: pypi-publish
-      url: https://pypi.org/p/utec-client/
-    steps:
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317 # v4.6.0
+      - name: Publish missing files to PyPI
+        if: steps.preflight.outputs.proceed == 'true'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          name: release-dists
-          path: dist/
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
-        with:
-          packages-dir: dist/
+          packages-dir: staging/
+      - name: Post-upload readback verification
+        run: python scripts/pypi_preflight.py --dist-dir dist --verify-published

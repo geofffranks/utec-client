@@ -1,10 +1,12 @@
 name: Weekly release
 
-# Mondays 13:00 UTC. Selects the highest fork release, verifies its tag is an
-# ancestor of main, and — only when main has newer commits — cuts the next
-# patch release. Skips with a notice when no fork baseline release exists yet
-# or main is unchanged; never bootstraps from inherited upstream releases.
-# Version-bump commits are never created.
+# Mondays 13:00 UTC. Selects the highest eligible fork release, verifies its
+# tag is an ancestor of main, and — only when main has newer commits — cuts
+# the next patch release at the pinned main commit. Skips with a notice when
+# no fork baseline release exists yet or main is unchanged; never bootstraps
+# from inherited upstream releases/tags. The exact validated wheel and sdist
+# are attached to the GitHub release BEFORE publication, so publish retries
+# reuse identical artifacts instead of rebuilding.
 
 on:
   schedule:
@@ -25,16 +27,16 @@ jobs:
       action: ${{ steps.decide.outputs.action }}
       tag: ${{ steps.decide.outputs.tag }}
       version: ${{ steps.decide.outputs.version }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git remote set-branches origin main
           git fetch origin main
@@ -52,40 +54,71 @@ jobs:
     needs: decide
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the tag and release only
+      contents: write # create the tag, release, and upload retained assets
       actions: write # explicitly dispatch the publish workflow
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.decide.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.decide.outputs.version }}
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Re-validate version at the pinned main tip
+        id: pin
+        run: |
+          git remote set-branches origin main
+          git fetch origin main
+          git checkout --detach origin/main
+          OUT=$(python scripts/prepare_release.py manual "$RELEASE_VERSION")
+          echo "$OUT"
+          echo "sha=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")" >> "$GITHUB_OUTPUT"
       - name: Check tag does not already exist
         run: |
-          if git rev-parse -q --verify "refs/tags/${{ needs.decide.outputs.tag }}" >/dev/null; then
-            echo "::error::tag ${{ needs.decide.outputs.tag }} already exists; tags are never moved"
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "::error::tag ${RELEASE_TAG} already exists; tags are never moved"
             exit 1
           fi
-      - name: Create tag and release at the selected main commit
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Create tag at the pinned main commit
         run: |
-          BASE=$(git rev-parse origin/main)
-          git tag "${{ needs.decide.outputs.tag }}" "$BASE"
-          git push origin "${{ needs.decide.outputs.tag }}"
-          PREV=$(git describe --tags --abbrev=0 "${{ needs.decide.outputs.tag }}^" 2>/dev/null || echo "")
-          if [ -n "$PREV" ]; then
-            NOTES=$(git log --oneline "$PREV..${{ needs.decide.outputs.tag }}")
-          else
-            NOTES=$(git log --oneline -20 "$BASE")
+          git tag "${RELEASE_TAG}" "${{ steps.pin.outputs.sha }}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+      - name: Build and validate the exact tagged source
+        run: |
+          git checkout --detach "refs/tags/${RELEASE_TAG}"
+          pip install -e .[dev]
+          ruff check . && ruff format --check .
+          pytest
+          python -m build
+          V=$(ls dist | grep '\.whl$'); V=${V#utec_client-}; V=${V%-py3-none-any.whl}
+          if [ "$V" != "${RELEASE_VERSION}" ]; then
+            echo "::error::built version $V != release version ${RELEASE_VERSION}"
+            exit 1
           fi
-          # The marker line identifies this as a fork release for weekly selection.
-          printf '%s\n\nFork release generated from the tip of main.\n\n```\n%s\n```\n' \
-            "utec-client-fork-release: true" "$NOTES" > body.md
-          gh release create "${{ needs.decide.outputs.tag }}" --title "utec-client ${{ needs.decide.outputs.version }}" --notes-file body.md
+          python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
+      - name: Generate release notes since the previous fork release
+        run: python scripts/prepare_release.py notes --tag "${RELEASE_TAG}" > notes-body.md
+      - name: Create the release with the fork marker
+        run: |
+          # The marker line identifies this as a fork release for weekly
+          # selection; eligibility additionally requires fork-base ancestry.
+          printf 'utec-client-fork-release: true\n\n' > release-body.md
+          cat notes-body.md >> release-body.md
+          gh release create "${RELEASE_TAG}" \
+            --verify-tag \
+            --title "utec-client ${RELEASE_VERSION}" \
+            --notes-file release-body.md
+      - name: Attach the exact validated artifacts and checksum manifest
+        run: |
+          sha256sum dist/* > dist/SHA256SUMS
+          gh release upload "${RELEASE_TAG}" dist/* --repo "$GITHUB_REPOSITORY"
       - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run publish.yml \
             --ref main \
-            -f tag="${{ needs.decide.outputs.tag }}" \
-            -f version="${{ needs.decide.outputs.version }}"
+            -f tag="${RELEASE_TAG}" \
+            -f version="${RELEASE_VERSION}"
