@@ -42,5 +42,5 @@ release time; it is not derived from the upstream `0.2.4`.
 
 ## License
 
-MIT, unchanged. Upstream authorship is preserved in `AUTHORS`/metadata and
-the license file ships inside the wheel and sdist.
+MIT, unchanged. Upstream authorship is preserved in the package metadata and the
+license file ships inside the wheel and sdist.
