@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Python dependencies (from pyproject.toml), weekly, no auto-merge.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies"]
+  # GitHub Actions, weekly, no auto-merge. Dependabot may update the pinned
+  # action revisions in workflows when new versions are released.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies"]

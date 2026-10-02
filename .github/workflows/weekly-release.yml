@@ -1,0 +1,91 @@
+name: Weekly release
+
+# Mondays 13:00 UTC. Selects the highest fork release, verifies its tag is an
+# ancestor of main, and — only when main has newer commits — cuts the next
+# patch release. Skips with a notice when no fork baseline release exists yet
+# or main is unchanged; never bootstraps from inherited upstream releases.
+# Version-bump commits are never created.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: utec-client-release
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+        with:
+          python-version: "3.13"
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-branches origin main
+          git fetch origin main
+          DECISION=$(python scripts/prepare_release.py weekly)
+          echo "$DECISION"
+          ACTION=$(echo "$DECISION" | python -c "import json,sys; print(json.load(sys.stdin)['action'])")
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          if [ "$ACTION" = release ]; then
+            echo "tag=$(echo "$DECISION" | python -c "import json,sys; print(json.load(sys.stdin)['tag'])")" >> "$GITHUB_OUTPUT"
+            echo "version=$(echo "$DECISION" | python -c "import json,sys; print(json.load(sys.stdin)['version'])")" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    if: needs.decide.outputs.action == 'release'
+    needs: decide
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag and release only
+      actions: write # explicitly dispatch the publish workflow
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Check tag does not already exist
+        run: |
+          if git rev-parse -q --verify "refs/tags/${{ needs.decide.outputs.tag }}" >/dev/null; then
+            echo "::error::tag ${{ needs.decide.outputs.tag }} already exists; tags are never moved"
+            exit 1
+          fi
+      - name: Create tag and release at the selected main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE=$(git rev-parse origin/main)
+          git tag "${{ needs.decide.outputs.tag }}" "$BASE"
+          git push origin "${{ needs.decide.outputs.tag }}"
+          PREV=$(git describe --tags --abbrev=0 "${{ needs.decide.outputs.tag }}^" 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            NOTES=$(git log --oneline "$PREV..${{ needs.decide.outputs.tag }}")
+          else
+            NOTES=$(git log --oneline -20 "$BASE")
+          fi
+          # The marker line identifies this as a fork release for weekly selection.
+          printf '%s\n\nFork release generated from the tip of main.\n\n```\n%s\n```\n' \
+            "utec-client-fork-release: true" "$NOTES" > body.md
+          gh release create "${{ needs.decide.outputs.tag }}" --title "utec-client ${{ needs.decide.outputs.version }}" --notes-file body.md
+      - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run publish.yml \
+            --ref main \
+            -f tag="${{ needs.decide.outputs.tag }}" \
+            -f version="${{ needs.decide.outputs.version }}"

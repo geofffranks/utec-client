@@ -5,16 +5,53 @@ on:
     branches: [main]
   pull_request:
 
+# PR checks are read-only and run no publishing credentials.
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[dev]
+      - run: ruff check .
+      - run: ruff format --check .
+
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+        with:
+          fetch-depth: 0 # setuptools-scm derives the version from tags
+      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e . -r requirements-test.txt
-      - run: pytest --cov=utec_py --cov-report=term-missing
+      - run: pip install -e .[dev]
+      # Coverage floor (90%) and flags are centralized in pyproject.toml.
+      - run: pytest
+
+  package:
+    # Verify wheel/sdist metadata and installed-package behavior outside the
+    # source checkout, including a wheel rebuilt from the sdist.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[dev]
+      - run: python -m build
+      - name: Verify artifacts from a clean environment
+        run: |
+          V=$(basename dist/*.whl .whl); V=${V#utec_client-}; V=${V%-py3-none-any}
+          python scripts/check_artifact.py --dist-dir dist --version "$V"

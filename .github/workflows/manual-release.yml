@@ -1,0 +1,67 @@
+name: Manual release
+
+# Manual dispatch accepting a custom stable version (X.Y.Z / vX.Y.Z) on main.
+# Can create the first fork release, permits intentional minor/major choices,
+# and refuses reused, lower, or invalid versions. The tag is created at the
+# current main tip; publishing then runs through the same validated path.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable version to release, e.g. 1.2.3 or v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: utec-client-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag and release only
+      actions: write # explicitly dispatch the publish workflow
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b # v5.3.0
+        with:
+          python-version: "3.13"
+      - name: Validate requested version against all existing tags
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          OUT=$(python scripts/prepare_release.py manual "$VERSION")
+          echo "$OUT"
+          echo "tag=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['tag'])")" >> "$GITHUB_OUTPUT"
+          echo "version=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['version'])")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")" >> "$GITHUB_OUTPUT"
+      - name: Create tag and release at pinned main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "${{ steps.validate.outputs.tag }}" "${{ steps.validate.outputs.sha }}"
+          git push origin "${{ steps.validate.outputs.tag }}"
+          # The marker line identifies this as a fork release for weekly selection.
+          printf '%s\n\nManual fork release of version %s.\n' \
+            "utec-client-fork-release: true" "${{ steps.validate.outputs.version }}" > body.md
+          gh release create "${{ steps.validate.outputs.tag }}" \
+            --target "${{ steps.validate.outputs.sha }}" \
+            --title "utec-client ${{ steps.validate.outputs.version }}" \
+            --notes-file body.md
+      - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run publish.yml \
+            --ref main \
+            -f tag="${{ steps.validate.outputs.tag }}" \
+            -f version="${{ steps.validate.outputs.version }}"
