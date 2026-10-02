@@ -46,11 +46,21 @@ def test_battery_level_returned(lock):
     assert lock.battery_level == 70
 
 
-def test_door_state_when_has_door_sensor(lock_with_door_sensor):
+@pytest.mark.parametrize("capability", ["st.DoorSensor", "st.doorSensor"])
+def test_door_state_accepts_api_capability_casing(lock_with_door_sensor, capability):
     lock_with_door_sensor._state_data = {"states": [
-        {"capability": "st.doorSensor", "name": "sensorState", "value": "Open"},
+        {"capability": capability, "name": "sensorState", "value": "Open"},
     ]}
     assert lock_with_door_sensor.is_door_open is True
+
+
+def test_door_state_detects_sensor_from_state_for_generic_lock(lock, discovery_dict, mock_api):
+    lock = Lock(discovery_dict(handle_type="utec-lock", category="SmartLock"), mock_api)
+    lock._state_data = {"states": [
+        {"capability": "st.DoorSensor", "name": "sensorState", "value": "Closed"},
+    ]}
+    assert lock.has_door_sensor is True
+    assert lock.door_state == "Closed"
 
 
 @pytest.mark.asyncio
