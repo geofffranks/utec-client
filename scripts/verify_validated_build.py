@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument(
+        "--built-by-run",
+        required=True,
+        type=int,
+        help="run ID of the trusted workflow run that produced this artifact",
+    )
     args = parser.parse_args(argv)
     dist = args.dir
 
@@ -66,6 +72,23 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    # ADV10: producer run ID validation — the artifact must have been built by
+    # the trusted run that reuse was located from, and the ID must be sane.
+    built_by_run = provenance.get("built_by_run")
+    if not isinstance(built_by_run, int) or built_by_run <= 0:
+        print(
+            f"::error::provenance built_by_run is not a valid run ID: {built_by_run!r}",
+            file=sys.stderr,
+        )
+        return 1
+    if built_by_run != args.built_by_run:
+        print(
+            f"::error::provenance built_by_run {built_by_run} does not match the "
+            f"trusted producer run {args.built_by_run}",
+            file=sys.stderr,
+        )
+        return 1
 
     wheel_name, sdist_name = expected_artifact_names(args.version)
     present = {os.path.basename(p) for p in glob.glob(os.path.join(dist, "*"))}
@@ -95,7 +118,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"validated build artifact verified: tag={expected['tag']} "
-        f"version={args.version} sha={args.sha} ({wheel_name}, {sdist_name})"
+        f"version={args.version} sha={args.sha} built_by_run={built_by_run} "
+        f"({wheel_name}, {sdist_name})"
     )
     return 0
 

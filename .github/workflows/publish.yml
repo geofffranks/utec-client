@@ -8,22 +8,22 @@ name: Publish to PyPI
 #    ancestor of origin/main, release carries the fork marker, tag commit a
 #    strict descendant of the fork base. Inputs only ever reach scripts via
 #    env vars.
-# 2. build: if a previous successful run of THIS trusted workflow already
-#    built the exact source commit (located and provenance-checked via the
-#    GitHub API, scripts/find_validated_build.py), its immutable GitHub
-#    Actions artifact is reused — retries never rebuild. Otherwise the
-#    selected source is checked out and fully validated (lint, tests, build,
-#    clean-environment artifact checks against the actual bytes and selected
-#    version), a PROVENANCE.json + SHA256SUMS pair is generated, and the
-#    artifact is uploaded as an immutable workflow artifact and attached to
-#    the GitHub release. Release assets are a convenience: trust rests on the
-#    workflow artifact plus provenance, never on the mutable release manifest
-#    alone.
+# 2. build: if a prior run of this trusted workflow already built the exact
+#    source commit (its BUILD job succeeded even if the run later failed at
+#    publish time; located via the GitHub API, scripts/find_validated_build.py),
+#    its immutable GitHub Actions artifact release-dists-<source sha> is
+#    reused — retries never rebuild. Otherwise, when PyPI has NO release
+#    files yet, the selected source is built and fully validated (lint,
+#    tests, build, clean-environment artifact checks); when PyPI already has
+#    files, a missing/unusable validated artifact fails closed instead of
+#    rebuilding originals. The artifact carries PROVENANCE.json (tag,
+#    version, source commit, building run) + SHA256SUMS. Release assets are
+#    intentionally NOT uploaded: trust rests on the immutable workflow
+#    artifact plus its provenance binding.
 # 3. pypi-publish (OIDC): re-downloads the same-run immutable artifact,
-#    re-verifies provenance + manifest + version, classifies against PyPI
-#    (read-only), uploads only missing files, then performs a post-upload
-#    readback verification. A validation failure in any earlier job makes
-#    publication impossible.
+#    re-verifies provenance + manifest + producer run + version, classifies
+#    against PyPI (read-only), uploads only missing distribution files, then
+#    performs a post-upload readback verification.
 
 on:
   workflow_call:
@@ -104,6 +104,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.validate-source.outputs.version }}
     outputs:
       source_sha: ${{ steps.prepub.outputs.sha }}
+      built_by_run: ${{ steps.decide.outputs.built_by_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,8 +116,6 @@ jobs:
       - run: pip install -e .[dev]
       - name: Resolve and re-verify source eligibility
         id: prepub
-        env:
-          CURRENT_RUN: ${{ github.run_id }}
         run: |
           git remote set-branches origin main
           git fetch origin main
@@ -125,29 +124,61 @@ jobs:
           SHA=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
       - name: Look for a prior validated build of this exact source
-        id: reuse
+        id: decide
         env:
           SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
           CURRENT_RUN: ${{ github.run_id }}
         run: |
           set +e
-          RUN_ID=$(python scripts/find_validated_build.py --sha "$SOURCE_SHA" --exclude-run "$CURRENT_RUN")
+          OUT=$(python scripts/find_validated_build.py --sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --exclude-run "$CURRENT_RUN")
           code=$?
           set -e
-          echo "reused_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "reused=$([ "$code" = 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          if [ "$code" = 2 ]; then
+            # Trusted run found but artifact missing/expired: fail closed here
+            # too (before any rebuild decision) with the actionable guidance
+            # the finder already printed.
+            exit 1
+          fi
+          if [ "$code" = 0 ]; then
+            REUSED_RUN=$(echo "$OUT" | awk '{print $1}')
+            ARTIFACT=$(echo "$OUT" | awk '{print $2}')
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+            echo "reused_run_id=$REUSED_RUN" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=$ARTIFACT" >> "$GITHUB_OUTPUT"
+            echo "built_by_run=$REUSED_RUN" >> "$GITHUB_OUTPUT"
+          else
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+            echo "built_by_run=$CURRENT_RUN" >> "$GITHUB_OUTPUT"
+          fi
       - name: Reuse prior validated build artifact
-        if: steps.reuse.outputs.reused == 'true'
+        if: steps.decide.outputs.reused == 'true'
         env:
-          REUSED_RUN: ${{ steps.reuse.outputs.reused_run_id }}
+          REUSED_RUN: ${{ steps.decide.outputs.reused_run_id }}
+          ARTIFACT_NAME: ${{ steps.decide.outputs.artifact_name }}
           SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
         run: |
           mkdir -p dist
-          gh run download "$REUSED_RUN" -n release-dists -D dist
+          if ! gh run download "$REUSED_RUN" -n "$ARTIFACT_NAME" -D dist; then
+            echo "::error::failed to download validated artifact $ARTIFACT_NAME from run $REUSED_RUN."
+            echo "::error::Recovery: re-run the failed jobs of run $REUSED_RUN (its build job rebuilds from the same source commit), then re-dispatch this publish run. Do NOT rebuild from a different source after files may be on PyPI."
+            exit 1
+          fi
           python scripts/verify_validated_build.py --dir dist --tag "$RELEASE_TAG" \
-            --version "$RELEASE_VERSION" --sha "$SOURCE_SHA"
+            --version "$RELEASE_VERSION" --sha "$SOURCE_SHA" --built-by-run "$REUSED_RUN"
+      - name: Rebuilding originals is only allowed while PyPI has no release files
+        if: steps.decide.outputs.reused != 'true'
+        run: |
+          set +e
+          python scripts/pypi_preflight.py --check-files-exist
+          code=$?
+          set -e
+          if [ "$code" = 0 ]; then
+            echo "::error::PyPI already has release files but no validated artifact for source ${{ steps.prepub.outputs.sha }} was found; refusing to rebuild originals."
+            echo "::error::Recovery: locate the original publish run (Actions -> 'Publish to PyPI' history for tag $RELEASE_TAG), re-run its failed build job, then re-dispatch publish with the same tag/version."
+            exit 1
+          fi
       - name: Build and fully validate the selected source
-        if: steps.reuse.outputs.reused != 'true'
+        if: steps.decide.outputs.reused != 'true'
         env:
           SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
           CURRENT_RUN: ${{ github.run_id }}
@@ -163,22 +194,17 @@ jobs:
             echo "::error::built version $V != release version ${RELEASE_VERSION}"
             exit 1
           fi
-          python -c "import json, os; json.dump({'tag': os.environ['RELEASE_TAG'], 'version': os.environ['RELEASE_VERSION'], 'source_sha': os.environ['SOURCE_SHA'], 'built_by_run': os.environ['CURRENT_RUN']}, open('dist/PROVENANCE.json', 'w'))"
+          python -c "import json, os; json.dump({'tag': os.environ['RELEASE_TAG'], 'version': os.environ['RELEASE_VERSION'], 'source_sha': os.environ['SOURCE_SHA'], 'built_by_run': int(os.environ['CURRENT_RUN'])}, open('dist/PROVENANCE.json', 'w'))"
+          sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS
           python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
-      - name: Generate checksum manifest
-        if: steps.reuse.outputs.reused != 'true'
-        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS
       - name: Check actual bytes against the selected version (all publish attempts)
         run: python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
       - name: Upload immutable validated artifact (this run)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-dists
+          name: release-dists-${{ steps.prepub.outputs.sha }}
           path: dist/
           if-no-files-found: error
-      - name: Attach the exact artifacts to the GitHub release (first build only)
-        if: steps.reuse.outputs.reused != 'true'
-        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
 
   pypi-publish:
     runs-on: ubuntu-latest
@@ -194,6 +220,7 @@ jobs:
       PUBLISH_TAG: ${{ needs.validate-source.outputs.tag }}
       PUBLISH_VERSION: ${{ needs.validate-source.outputs.version }}
       SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+      BUILT_BY_RUN: ${{ needs.build.outputs.built_by_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -203,12 +230,12 @@ jobs:
           python-version: "3.13"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-dists
+          name: release-dists-${{ needs.build.outputs.source_sha }}
           path: dist/
-      - name: Re-verify provenance and manifest of the exact bytes
+      - name: Re-verify provenance, producer run, and manifest of the exact bytes
         run: |
           python scripts/verify_validated_build.py --dir dist --tag "$PUBLISH_TAG" \
-            --version "$PUBLISH_VERSION" --sha "$SOURCE_SHA"
+            --version "$PUBLISH_VERSION" --sha "$SOURCE_SHA" --built-by-run "$BUILT_BY_RUN"
       - name: Read-only PyPI preflight (new / identical / conflict) and staging of new files
         id: preflight
         run: |

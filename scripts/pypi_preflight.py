@@ -18,6 +18,13 @@ Modes:
     Post-upload readback: every local dist file must now exist on PyPI with an
     identical sha256 digest. Exit 0 only when all files verified; skipped
     ("already") files count as verified. Prints a JSON summary on stdout.
+
+  check-files-exist
+    Exit 0 when the project already has ANY release files on PyPI, exit 1
+    when it has none (404 or empty). Used by the publish build job to decide
+    the N5 fail-closed rule: after any files are on PyPI, a missing or
+    expired validated artifact must block publication — rebuilding originals
+    is only allowed when PyPI has no release files at all.
 """
 
 from __future__ import annotations
@@ -117,6 +124,17 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def project_has_files(project: str) -> bool:
+    """True when the project already has any release files on PyPI (N5)."""
+    return bool(fetch_pypi(project))
+
+
+def cmd_check_files_exist(args: argparse.Namespace) -> int:
+    exists = project_has_files(args.project)
+    print(json.dumps({"project": args.project, "has_files": exists}))
+    return 0 if exists else 1
+
+
 def cmd_verify_published(args: argparse.Namespace) -> int:
     local = local_dists(args.dist_dir)
     remote = fetch_pypi(args.project)
@@ -140,7 +158,7 @@ def cmd_verify_published(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist-dir", default="dist")
     parser.add_argument("--project", default="utec-client")
@@ -153,7 +171,14 @@ def main() -> int:
         action="store_true",
         help="post-upload readback: verify every local dist file is on PyPI with matching sha256",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--check-files-exist",
+        action="store_true",
+        help="exit 0 if the project has any release files on PyPI, 1 otherwise",
+    )
+    args = parser.parse_args(argv)
+    if args.check_files_exist:
+        return cmd_check_files_exist(args)
     if args.verify_published:
         return cmd_verify_published(args)
     return cmd_check(args)

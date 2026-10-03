@@ -64,20 +64,33 @@ All three entry points converge on `publish.yml`:
    before the tag's contents are used for anything. All user inputs reach
    scripts through environment variables, never raw shell interpolation.
 2. **Common validated build with immutable artifacts and provenance**
-   (`build` job): if a previous **successful run of the trusted publish
-   workflow** already built the exact source commit (located via the GitHub
-   API: same workflow path, success conclusion, exact `head_sha`, allowed
-   trigger event), its immutable GitHub Actions artifact `release-dists` is
-   reused — retries never rebuild. Otherwise the selected source is checked
-   out and fully validated (Ruff, tests, build, clean-environment artifact
-   checks against the actual bytes and selected version), a
-   `PROVENANCE.json` (tag, version, source commit, building run) and
-   `SHA256SUMS` manifest are generated, and the artifact is uploaded as an
-   immutable workflow artifact and attached to the GitHub release. Release
-   assets are a convenience only: trust rests on the workflow artifact plus
-   its provenance binding, never on the mutable release manifest alone — a
-   self-consistent manifest with the wrong source/version binding is
-   rejected.
+   (`build` job): reuse is decided per BUILD job, not per run — a run whose
+   publish later failed or was cancelled still contributes its successful
+   build. Candidates are runs of the trusted workflow path with a trusted
+   trigger event on a trusted ref (dispatch/schedule on `main`; release
+   events on the release tag). `run.head_sha` is only the dispatch ref's
+   head, so main advancing past an older release tag does not block reuse;
+   the exact-source binding comes from the artifact name
+   `release-dists-<full source sha>` and is proven after download by
+   `PROVENANCE.json` (tag, version, source SHA, producing run ID) plus
+   `SHA256SUMS` over the actual bytes. API responses are parsed as true JSON
+   envelope objects, paginated page by page.
+
+   Workflow artifacts are immutable and retained for 90 days by default.
+   Recovery when a validated artifact is missing or expired:
+
+   - **Primary route:** re-run the failed jobs of the ORIGINAL publish run
+     (Actions history → the run for this tag). Its build job rebuilds from
+     the same source commit, and the publish job retries with the same
+     tag/version.
+   - **Cross-run lookup:** dispatch `publish.yml` with the same tag/version;
+     it searches newer trusted runs for a reusable validated build of the
+     same source.
+
+   If no validated artifact exists and PyPI already has release files,
+   publication fails closed with recovery guidance — originals are never
+   silently rebuilt. Rebuilding is only allowed while PyPI has no release
+   files at all (e.g. the first publish attempt).
 3. **Publication** (`pypi-publish` job): re-downloads the same-run immutable
    artifact, re-verifies provenance and manifest, classifies against PyPI
    (read-only JSON API): missing → staged for upload; identical sha256 →
@@ -145,8 +158,9 @@ Name checks are provisional until configured on PyPI.
 ## Unverified (hosted-only)
 
 - Scheduled weekly runs, `gh workflow run` dispatch, environment approval
-  gates and branch/tag restrictions, OIDC trust, and actual PyPI publication
-  have not been exercised.
+  gates and branch/tag restrictions, OIDC trust, actual PyPI publication,
+  and real GitHub Actions artifact retention/download behavior have not
+  been exercised.
 - The PyPI name `utec-client` returned 404 at implementation time but is not
   reserved; a name rejection is an owner follow-up, not something this repo
   can fix.
