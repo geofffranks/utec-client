@@ -39,6 +39,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -211,16 +212,40 @@ def cmd_check_files_exist(args: argparse.Namespace) -> int:
 
 def cmd_verify_published(args: argparse.Namespace) -> int:
     local = local_dists(args.dist_dir)
-    remote = fetch_pypi(args.project)
-    verified, missing, wrong = [], [], []
-    for name, digest in local.items():
-        info = remote.get(name)
-        if info is None:
-            missing.append(name)
-        elif info["digests"].get("sha256") == digest:
-            verified.append(name)
+    attempts = getattr(args, "readback_attempts", 1)
+    interval = getattr(args, "readback_interval", 10)
+    for attempt in range(1, attempts + 1):
+        try:
+            remote = fetch_pypi(args.project)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            transient = not isinstance(exc, urllib.error.HTTPError) or (
+                exc.code == 429 or 500 <= exc.code < 600
+            )
+            if not transient or attempt == attempts:
+                print(f"::error::post-upload readback failed: {exc}", file=sys.stderr)
+                return 1
+            print(
+                f"::warning::PyPI readback attempt {attempt}/{attempts}: {exc}; retrying",
+                file=sys.stderr,
+            )
         else:
-            wrong.append(name)
+            verified, missing, wrong = [], [], []
+            for name, digest in local.items():
+                info = remote.get(name)
+                if info is None:
+                    missing.append(name)
+                elif info["digests"].get("sha256") == digest:
+                    verified.append(name)
+                else:
+                    wrong.append(name)
+            if wrong or not missing or attempt == attempts:
+                break
+            print(
+                f"::warning::PyPI readback attempt {attempt}/{attempts}: "
+                f"missing={missing}; retrying",
+                file=sys.stderr,
+            )
+        time.sleep(interval)
     print(json.dumps({"verified": verified, "missing": missing, "wrong_digest": wrong}))
     if missing or wrong:
         print(
@@ -253,7 +278,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--version", help="release version for --check-files-exist (required there)"
     )
+    parser.add_argument(
+        "--readback-attempts",
+        type=int,
+        default=1,
+        help="maximum readback attempts in --verify-published mode (default: 1)",
+    )
+    parser.add_argument(
+        "--readback-interval",
+        type=int,
+        default=10,
+        help="seconds between readback attempts (default: 10)",
+    )
     args = parser.parse_args(argv)
+    if args.readback_attempts < 1 or args.readback_interval < 0:
+        parser.error("readback attempts must be positive and interval must be nonnegative")
     if args.check_files_exist:
         if not args.version:
             parser.error("--check-files-exist requires --version")

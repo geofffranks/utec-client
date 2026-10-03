@@ -260,4 +260,6 @@ jobs:
         with:
           packages-dir: staging/
       - name: Post-upload readback verification
-        run: python scripts/pypi_preflight.py --dist-dir dist --verify-published
+        run: >-
+          python scripts/pypi_preflight.py --dist-dir dist --verify-published
+          --readback-attempts 13 --readback-interval 10
