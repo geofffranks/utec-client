@@ -5,8 +5,9 @@ name: Manual release
 # ref is rejected: the workflow checks out main and compares the pinned HEAD
 # against the fetched origin/main tip). Can create the first fork release,
 # permits intentional minor/major choices, and refuses reused, lower, or
-# non-stable versions. The exact validated wheel and sdist are attached to
-# the GitHub release BEFORE publication.
+# non-stable versions. After creating the tag and release it dispatches the
+# common validated publishing path (publish.yml), which builds and checks
+# the exact tagged source.
 
 on:
   workflow_dispatch:
@@ -27,7 +28,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the tag, release, and upload retained assets
+      contents: write # create the tag and release
       actions: write # explicitly dispatch the publish workflow
     env:
       GH_TOKEN: ${{ github.token }}
@@ -58,22 +59,6 @@ jobs:
         run: |
           git tag "${RELEASE_TAG}" "${PINNED_SHA}"
           git push origin "refs/tags/${RELEASE_TAG}"
-      - name: Build and validate the exact tagged source
-        env:
-          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.pin.outputs.version }}
-        run: |
-          git checkout --detach "refs/tags/${RELEASE_TAG}"
-          pip install -e .[dev]
-          ruff check . && ruff format --check .
-          pytest
-          python -m build
-          V=$(ls dist | grep '\.whl$'); V=${V#utec_client-}; V=${V%-py3-none-any.whl}
-          if [ "$V" != "${RELEASE_VERSION}" ]; then
-            echo "::error::built version $V != release version ${RELEASE_VERSION}"
-            exit 1
-          fi
-          python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
       - name: Generate release notes since the previous fork release
         env:
           RELEASE_TAG: ${{ steps.pin.outputs.tag }}
@@ -92,13 +77,7 @@ jobs:
             --target "${{ steps.pin.outputs.sha }}" \
             --title "utec-client ${RELEASE_VERSION}" \
             --notes-file release-body.md
-      - name: Attach the exact validated artifacts and checksum manifest
-        env:
-          RELEASE_TAG: ${{ steps.pin.outputs.tag }}
-        run: |
-          sha256sum dist/* > dist/SHA256SUMS
-          gh release upload "${RELEASE_TAG}" dist/* --repo "$GITHUB_REPOSITORY"
-      - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
+      - name: Dispatch the common validated publishing path
         env:
           RELEASE_TAG: ${{ steps.pin.outputs.tag }}
           RELEASE_VERSION: ${{ steps.pin.outputs.version }}

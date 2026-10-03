@@ -26,7 +26,8 @@ repository or PyPI yet; every hosted step is listed under "Unverified".
   is rejected: the workflow always checks out `main` and compares the pinned
   HEAD against the fetched `origin/main` tip before validating.
 - **Human releases**: a GitHub release you create in the UI triggers the same
-  validated publishing path (`publish.yml` on `release: published`).
+  validated publishing path (`publish.yml` on `release: published`) and is
+  built by the same trusted job — no handcrafted artifacts.
 
 ### Fork-release eligibility (what counts, and what never can)
 
@@ -50,7 +51,9 @@ no matter what text is added to its release body: inherited tags point at
 commits that predate (or are) the fork base, so the strict-descendant check
 fails regardless of a forged marker.
 
-## Publishing path
+## Publishing path (single common flow for human, manual, and weekly)
+
+All three entry points converge on `publish.yml`:
 
 1. **Validation from trusted tooling, before any target-tag use**
    (`publish.yml`, `validate-source` job): runs from a `main` checkout — not
@@ -60,19 +63,29 @@ fails regardless of a forged marker.
    commit is a strict descendant of the fork base. Any failure stops the run
    before the tag's contents are used for anything. All user inputs reach
    scripts through environment variables, never raw shell interpolation.
-2. **Artifacts are retained before publication**: the release workflows run
-   lint/tests/build on the exact tagged commit, verify the built version
-   equals the release version and pass clean-environment artifact checks,
-   then attach the wheel, sdist, and a `SHA256SUMS` manifest to the GitHub
-   release. Artifacts are never rebuilt at publish time, so a retry always
-   uses byte-identical files.
-3. **Publication** (`publish.yml`, `pypi-publish` job): downloads the
-   retained release assets, verifies every file against the `SHA256SUMS`
-   manifest, classifies against PyPI (read-only JSON API): missing → staged
-   for upload; identical sha256 → already published (skip); different digest
-   → abort, never overwrite. Only the missing files are uploaded, then a
-   **post-upload readback** re-queries PyPI and requires every local dist
-   file to exist there with an identical sha256.
+2. **Common validated build with immutable artifacts and provenance**
+   (`build` job): if a previous **successful run of the trusted publish
+   workflow** already built the exact source commit (located via the GitHub
+   API: same workflow path, success conclusion, exact `head_sha`, allowed
+   trigger event), its immutable GitHub Actions artifact `release-dists` is
+   reused — retries never rebuild. Otherwise the selected source is checked
+   out and fully validated (Ruff, tests, build, clean-environment artifact
+   checks against the actual bytes and selected version), a
+   `PROVENANCE.json` (tag, version, source commit, building run) and
+   `SHA256SUMS` manifest are generated, and the artifact is uploaded as an
+   immutable workflow artifact and attached to the GitHub release. Release
+   assets are a convenience only: trust rests on the workflow artifact plus
+   its provenance binding, never on the mutable release manifest alone — a
+   self-consistent manifest with the wrong source/version binding is
+   rejected.
+3. **Publication** (`pypi-publish` job): re-downloads the same-run immutable
+   artifact, re-verifies provenance and manifest, classifies against PyPI
+   (read-only JSON API): missing → staged for upload; identical sha256 →
+   already published (skip); different digest → abort, never overwrite.
+   Only distribution files (wheel/sdist; auxiliary files like the manifest
+   are never treated as distributions) are uploaded, then a **post-upload
+   readback** re-queries PyPI and requires every dist file to exist there
+   with an identical sha256.
 4. Publication uses PyPI **Trusted Publishing (OIDC)** from the
    `pypi-publish` GitHub environment. No PyPI API token is stored in the
    repository. `id-token: write` exists only in the publish job.
@@ -89,11 +102,13 @@ interleave.
 ## Retries after partial publication
 
 Dispatch `publish.yml` manually with the same `tag` and `version`. It
-validates source eligibility exactly as on the first attempt, downloads the
-same retained release assets (no rebuild from newer source), skips files
-already uploaded with identical hashes, uploads only what is missing, and
-verifies the result by readback. Never bump the version to "work around" a
-failed publish.
+validates source eligibility exactly as on the first attempt, locates the
+prior successful validated build of the same source commit via the GitHub
+API, reuses its immutable artifact byte-for-byte (no rebuild from newer
+source), re-verifies provenance/manifest/version and runs the clean-environ
+artifact checks against the actual bytes, skips files already uploaded with
+identical hashes, uploads only what is missing, and verifies the result by
+readback. Never bump the version to "work around" a failed publish.
 
 ## Owner setup (one-time)
 
@@ -150,4 +165,6 @@ python scripts/prepare_release.py notes --tag v1.1.0               # notes since
 python scripts/pypi_preflight.py --dist-dir dist                   # read-only PyPI check
 python scripts/pypi_preflight.py --dist-dir dist --verify-published
 python scripts/verify_assets.py --dir dist --manifest dist/SHA256SUMS
+python scripts/find_validated_build.py --sha SHA --exclude-run RUN   # reuse lookup
+python scripts/verify_validated_build.py --dir dist --tag vX.Y.Z --version X.Y.Z --sha SHA
 ```

@@ -1,20 +1,29 @@
 name: Publish to PyPI
 
-# Publishes the exact validated wheel+sdist retained as GitHub release assets
-# BEFORE publication. The publish job never rebuilds: it downloads the
-# release assets, verifies them against the attached SHA256SUMS manifest,
-# classifies them against PyPI (read-only), uploads only missing files, then
-# performs a post-upload readback verification against PyPI.
+# The single common validated publishing path for human-created, manual, and
+# weekly releases. Flow:
 #
-# Triggers:
-# - workflow_dispatch/workflow_call with tag+version (release workflows and
-#   safe retries after partial publication), and
-# - human-created GitHub releases (which must carry the fork-release marker;
-#   see docs/RELEASES.md).
-#
-# Security: inputs are only ever consumed through env vars (never raw shell
-# interpolation); source eligibility is validated here from trusted main
-# tooling BEFORE the release tag is checked out for anything.
+# 1. validate-source (trusted main checkout, before any target-tag use):
+#    strict stable tag/version pair, single remote tag ref, tag commit an
+#    ancestor of origin/main, release carries the fork marker, tag commit a
+#    strict descendant of the fork base. Inputs only ever reach scripts via
+#    env vars.
+# 2. build: if a previous successful run of THIS trusted workflow already
+#    built the exact source commit (located and provenance-checked via the
+#    GitHub API, scripts/find_validated_build.py), its immutable GitHub
+#    Actions artifact is reused — retries never rebuild. Otherwise the
+#    selected source is checked out and fully validated (lint, tests, build,
+#    clean-environment artifact checks against the actual bytes and selected
+#    version), a PROVENANCE.json + SHA256SUMS pair is generated, and the
+#    artifact is uploaded as an immutable workflow artifact and attached to
+#    the GitHub release. Release assets are a convenience: trust rests on the
+#    workflow artifact plus provenance, never on the mutable release manifest
+#    alone.
+# 3. pypi-publish (OIDC): re-downloads the same-run immutable artifact,
+#    re-verifies provenance + manifest + version, classifies against PyPI
+#    (read-only), uploads only missing files, then performs a post-upload
+#    readback verification. A validation failure in any earlier job makes
+#    publication impossible.
 
 on:
   workflow_call:
@@ -28,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag whose retained assets should be published"
+        description: "Release tag to publish (must already exist)"
         required: true
         type: string
       version:
@@ -47,11 +56,6 @@ permissions:
 
 jobs:
   validate-source:
-    # Trusted-main validation, before any use of the target tag contents:
-    # strict stable tag/version pair, single remote tag ref, tag commit an
-    # ancestor of origin/main, release marked as a fork release, and the tag
-    # commit a strict descendant of the fork base (inherited upstream tags
-    # can never pass, marker or not).
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.set.outputs.tag }}
@@ -88,9 +92,97 @@ jobs:
           git fetch origin main
           python scripts/prepare_release.py prepublish --tag "$PUBLISH_TAG" --version "$PUBLISH_VERSION"
 
-  pypi-publish:
+  build:
     runs-on: ubuntu-latest
     needs: validate-source
+    permissions:
+      contents: read
+      actions: read # locate/download the prior validated build artifact
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate-source.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.validate-source.outputs.version }}
+    outputs:
+      source_sha: ${{ steps.prepub.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[dev]
+      - name: Resolve and re-verify source eligibility
+        id: prepub
+        env:
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          git remote set-branches origin main
+          git fetch origin main
+          OUT=$(python scripts/prepare_release.py prepublish --tag "$RELEASE_TAG" --version "$RELEASE_VERSION")
+          echo "$OUT"
+          SHA=$(echo "$OUT" | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - name: Look for a prior validated build of this exact source
+        id: reuse
+        env:
+          SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          set +e
+          RUN_ID=$(python scripts/find_validated_build.py --sha "$SOURCE_SHA" --exclude-run "$CURRENT_RUN")
+          code=$?
+          set -e
+          echo "reused_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "reused=$([ "$code" = 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Reuse prior validated build artifact
+        if: steps.reuse.outputs.reused == 'true'
+        env:
+          REUSED_RUN: ${{ steps.reuse.outputs.reused_run_id }}
+          SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
+        run: |
+          mkdir -p dist
+          gh run download "$REUSED_RUN" -n release-dists -D dist
+          python scripts/verify_validated_build.py --dir dist --tag "$RELEASE_TAG" \
+            --version "$RELEASE_VERSION" --sha "$SOURCE_SHA"
+      - name: Build and fully validate the selected source
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          SOURCE_SHA: ${{ steps.prepub.outputs.sha }}
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git checkout --detach "refs/tags/${RELEASE_TAG}"
+          pip install -e .[dev]
+          ruff check . && ruff format --check .
+          pytest
+          python -m build
+          V=$(ls dist | grep '\.whl$'); V=${V#utec_client-}; V=${V%-py3-none-any.whl}
+          if [ "$V" != "${RELEASE_VERSION}" ]; then
+            echo "::error::built version $V != release version ${RELEASE_VERSION}"
+            exit 1
+          fi
+          python -c "import json, os; json.dump({'tag': os.environ['RELEASE_TAG'], 'version': os.environ['RELEASE_VERSION'], 'source_sha': os.environ['SOURCE_SHA'], 'built_by_run': os.environ['CURRENT_RUN']}, open('dist/PROVENANCE.json', 'w'))"
+          python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
+      - name: Generate checksum manifest
+        if: steps.reuse.outputs.reused != 'true'
+        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS
+      - name: Check actual bytes against the selected version (all publish attempts)
+        run: python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
+      - name: Upload immutable validated artifact (this run)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dists
+          path: dist/
+          if-no-files-found: error
+      - name: Attach the exact artifacts to the GitHub release (first build only)
+        if: steps.reuse.outputs.reused != 'true'
+        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  pypi-publish:
+    runs-on: ubuntu-latest
+    needs: build
     permissions:
       id-token: write # the only job with publishing authority (OIDC)
       contents: read
@@ -101,6 +193,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PUBLISH_TAG: ${{ needs.validate-source.outputs.tag }}
       PUBLISH_VERSION: ${{ needs.validate-source.outputs.version }}
+      SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,13 +201,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - name: Download retained release assets
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dists
+          path: dist/
+      - name: Re-verify provenance and manifest of the exact bytes
         run: |
-          mkdir -p dist
-          gh release download "$PUBLISH_TAG" --repo "$GITHUB_REPOSITORY" --dir dist
-          ls -la dist
-      - name: Verify assets against the retained SHA256SUMS manifest
-        run: python scripts/verify_assets.py --dir dist --manifest dist/SHA256SUMS
+          python scripts/verify_validated_build.py --dir dist --tag "$PUBLISH_TAG" \
+            --version "$PUBLISH_VERSION" --sha "$SOURCE_SHA"
       - name: Read-only PyPI preflight (new / identical / conflict) and staging of new files
         id: preflight
         run: |

@@ -43,14 +43,24 @@ def sha256_of(path: str) -> str:
     return h.hexdigest()
 
 
+DISTRIBUTION_SUFFIXES = (".whl", ".tar.gz")
+
+
 def local_dists(dist_dir: str) -> dict[str, str]:
+    """Digests of the distribution files only (wheel and sdist).
+
+    Strict filtering by distribution suffix: auxiliary files that may live in
+    dist/ (e.g. the SHA256SUMS manifest attached to release assets) are never
+    treated as publishable distributions, so staging and the post-upload
+    readback never demand them on PyPI.
+    """
     files = {
         os.path.basename(p): p
         for p in sorted(glob.glob(os.path.join(dist_dir, "*")))
-        if os.path.isfile(p)
+        if os.path.isfile(p) and p.endswith(DISTRIBUTION_SUFFIXES)
     }
     if not files:
-        raise SystemExit(f"no files in {dist_dir}")
+        raise SystemExit(f"no .whl or .tar.gz distribution files in {dist_dir}")
     return {name: sha256_of(path) for name, path in files.items()}
 
 

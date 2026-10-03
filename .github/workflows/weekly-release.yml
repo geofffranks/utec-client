@@ -2,11 +2,11 @@ name: Weekly release
 
 # Mondays 13:00 UTC. Selects the highest eligible fork release, verifies its
 # tag is an ancestor of main, and — only when main has newer commits — cuts
-# the next patch release at the pinned main commit. Skips with a notice when
-# no fork baseline release exists yet or main is unchanged; never bootstraps
-# from inherited upstream releases/tags. The exact validated wheel and sdist
-# are attached to the GitHub release BEFORE publication, so publish retries
-# reuse identical artifacts instead of rebuilding.
+# the next patch release at the pinned main commit, then dispatches the
+# common validated publishing path (publish.yml), which builds and checks
+# the exact tagged source. Skips with a notice when no fork baseline release
+# exists yet or main is unchanged; never bootstraps from inherited upstream
+# releases/tags.
 
 on:
   schedule:
@@ -54,7 +54,7 @@ jobs:
     needs: decide
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the tag, release, and upload retained assets
+      contents: write # create the tag and release
       actions: write # explicitly dispatch the publish workflow
     env:
       GH_TOKEN: ${{ github.token }}
@@ -87,19 +87,6 @@ jobs:
         run: |
           git tag "${RELEASE_TAG}" "${{ steps.pin.outputs.sha }}"
           git push origin "refs/tags/${RELEASE_TAG}"
-      - name: Build and validate the exact tagged source
-        run: |
-          git checkout --detach "refs/tags/${RELEASE_TAG}"
-          pip install -e .[dev]
-          ruff check . && ruff format --check .
-          pytest
-          python -m build
-          V=$(ls dist | grep '\.whl$'); V=${V#utec_client-}; V=${V%-py3-none-any.whl}
-          if [ "$V" != "${RELEASE_VERSION}" ]; then
-            echo "::error::built version $V != release version ${RELEASE_VERSION}"
-            exit 1
-          fi
-          python scripts/check_artifact.py --dist-dir dist --version "${RELEASE_VERSION}"
       - name: Generate release notes since the previous fork release
         run: python scripts/prepare_release.py notes --tag "${RELEASE_TAG}" > notes-body.md
       - name: Create the release with the fork marker
@@ -112,11 +99,7 @@ jobs:
             --verify-tag \
             --title "utec-client ${RELEASE_VERSION}" \
             --notes-file release-body.md
-      - name: Attach the exact validated artifacts and checksum manifest
-        run: |
-          sha256sum dist/* > dist/SHA256SUMS
-          gh release upload "${RELEASE_TAG}" dist/* --repo "$GITHUB_REPOSITORY"
-      - name: Explicitly dispatch publishing (GITHUB_TOKEN release events do not trigger workflows)
+      - name: Dispatch the common validated publishing path
         run: |
           gh workflow run publish.yml \
             --ref main \

@@ -31,6 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", default="dist")
     parser.add_argument("--manifest", default="dist/SHA256SUMS")
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        default=[],
+        help="file name allowed to exist unlisted in --dir (e.g. PROVENANCE.json)",
+    )
     args = parser.parse_args(argv)
 
     with open(args.manifest) as f:
@@ -54,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(f"missing: {name}")
         elif sha256_of(path) != digest:
             problems.append(f"digest mismatch: {name}")
-    for name in sorted(present - set(expected)):
+    for name in sorted(present - set(expected) - set(args.ignore)):
         problems.append(f"unlisted file: {name}")
 
     if problems:
