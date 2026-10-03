@@ -32,8 +32,8 @@ classifiers = [
 keywords = ["utec", "uhome", "home automation", "api client"]
 
 [project.urls]
-Homepage = "https://github.com/geofffranks/utec-py"
-Issues = "https://github.com/geofffranks/utec-py/issues"
+Homepage = "https://github.com/geofffranks/utec-client"
+Issues = "https://github.com/geofffranks/utec-client/issues"
 
 [project.optional-dependencies]
 dev = [

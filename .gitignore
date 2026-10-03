@@ -7,6 +7,7 @@
 pypi.py
 test.py
 .venv/
+docs/RELEASES.md
 
 # User-specific files
 *.rsuser
