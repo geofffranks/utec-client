@@ -20,11 +20,14 @@ Modes:
     ("already") files count as verified. Prints a JSON summary on stdout.
 
   check-files-exist
-    Exit 0 when the project already has ANY release files on PyPI, exit 1
-    when it has none (404 or empty). Used by the publish build job to decide
-    the N5 fail-closed rule: after any files are on PyPI, a missing or
-    expired validated artifact must block publication — rebuilding originals
-    is only allowed when PyPI has no release files at all.
+    Version-scoped (requires --version): exit 0 when the SELECTED version
+    already has files on PyPI, 1 when it has none (404 on the version JSON
+    endpoint; a project-level 404 is reported distinctly), 4 when PyPI state
+    cannot be determined. Used by the publish build job for the fail-closed
+    rule: after any files of the SELECTED version are on PyPI, a missing or
+    expired validated artifact blocks publication — rebuilding that version
+    is only allowed while it has no files on PyPI. Older published versions
+    never block a new release.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ import urllib.error
 import urllib.request
 
 PYPI_JSON = "https://pypi.org/pypi/{project}/json"
+PYPI_VERSION_JSON = "https://pypi.org/pypi/{project}/{version}/json"
 
 
 def sha256_of(path: str) -> str:
@@ -129,10 +133,80 @@ def project_has_files(project: str) -> bool:
     return bool(fetch_pypi(project))
 
 
+def fetch_pypi_version(project: str, version: str) -> dict | None:
+    """Version JSON for one release, or None on HTTP 404.
+
+    404 covers both "project not on PyPI" and "version not published";
+    callers that need the distinction re-query the project endpoint. Other
+    HTTP errors propagate (the caller must fail closed on unknown state).
+    """
+    try:
+        with urllib.request.urlopen(
+            PYPI_VERSION_JSON.format(project=project, version=version), timeout=30
+        ) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
 def cmd_check_files_exist(args: argparse.Namespace) -> int:
-    exists = project_has_files(args.project)
-    print(json.dumps({"project": args.project, "has_files": exists}))
-    return 0 if exists else 1
+    """N6: gate on the SELECTED release's files only, never project-wide.
+
+    Exit codes: 0 = the selected version already has files on PyPI; 1 = it
+    has none (rebuilding/revalidating this version is safe); 4 = PyPI state
+    could not be determined (transport/API error) — the caller must fail
+    closed rather than guess.
+    """
+    try:
+        data = fetch_pypi_version(args.project, args.version)
+    except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        print(
+            f"::error::cannot determine PyPI state for {args.project} {args.version}: {exc}; "
+            "refusing to decide rebuild eligibility on unknown state",
+            file=sys.stderr,
+        )
+        return 4
+    if data is None:
+        # Distinguish a 404 for the whole project from a missing version.
+        detail = "version-not-published"
+        try:
+            if not fetch_pypi(args.project):
+                detail = "project-not-on-pypi"
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                detail = "project-not-on-pypi"
+            else:
+                print(
+                    f"::error::cannot determine PyPI state for {args.project} {args.version}: "
+                    f"HTTP {exc.code}; refusing to decide rebuild eligibility on unknown state",
+                    file=sys.stderr,
+                )
+                return 4
+        print(
+            json.dumps(
+                {
+                    "project": args.project,
+                    "version": args.version,
+                    "has_files": False,
+                    "detail": detail,
+                }
+            )
+        )
+        return 1
+    has_files = bool(data.get("urls"))
+    print(
+        json.dumps(
+            {
+                "project": args.project,
+                "version": args.version,
+                "has_files": has_files,
+                "detail": "version-published",
+            }
+        )
+    )
+    return 0 if has_files else 1
 
 
 def cmd_verify_published(args: argparse.Namespace) -> int:
@@ -174,10 +248,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-files-exist",
         action="store_true",
-        help="exit 0 if the project has any release files on PyPI, 1 otherwise",
+        help="exit 0 if the SELECTED --version has files on PyPI, 1 if none, 4 if unknown",
+    )
+    parser.add_argument(
+        "--version", help="release version for --check-files-exist (required there)"
     )
     args = parser.parse_args(argv)
     if args.check_files_exist:
+        if not args.version:
+            parser.error("--check-files-exist requires --version")
         return cmd_check_files_exist(args)
     if args.verify_published:
         return cmd_verify_published(args)

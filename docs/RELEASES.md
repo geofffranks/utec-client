@@ -76,21 +76,41 @@ All three entry points converge on `publish.yml`:
    `SHA256SUMS` over the actual bytes. API responses are parsed as true JSON
    envelope objects, paginated page by page.
 
-   Workflow artifacts are immutable and retained for 90 days by default.
-   Recovery when a validated artifact is missing or expired:
+   Workflow artifacts are immutable and uploaded with an explicit 90-day
+   retention (the maximum supported); for anything longer, retain offline
+   originals of each release's wheel, sdist, SHA256SUMS, and PROVENANCE.json.
+   Builds are NOT promised to be reproducible (dependency/tool versions vary
+   over time), so a rebuilt artifact can never substitute for the original
+   one on retry.
 
-   - **Primary route:** re-run the failed jobs of the ORIGINAL publish run
-     (Actions history → the run for this tag). Its build job rebuilds from
-     the same source commit, and the publish job retries with the same
-     tag/version.
-   - **Cross-run lookup:** dispatch `publish.yml` with the same tag/version;
-     it searches newer trusted runs for a reusable validated build of the
-     same source.
+   Recovery, depending on the state of the SELECTED version on PyPI:
 
-   If no validated artifact exists and PyPI already has release files,
-   publication fails closed with recovery guidance — originals are never
-   silently rebuilt. Rebuilding is only allowed while PyPI has no release
-   files at all (e.g. the first publish attempt).
+   - **No files of the selected version on PyPI** (first attempt failed
+     before any upload, or failed cleanly): rebuilding is safe. Re-run the
+     failed build job of the original run, or dispatch `publish.yml` again
+     with the same tag/version — either revalidates a fresh build from the
+     same source commit.
+   - **Partial files of the selected version on PyPI**: recover the exact
+     ORIGINAL retained artifact. Primary route: re-run the failed **publish**
+     job of the original run (its immutable `release-dists-<sha>` artifact is
+     still retained; do not rerun the build job — a rebuild produces
+     different bytes and cannot complete a partially published version).
+     Cross-run route: dispatch `publish.yml` with the same tag/version; it
+     reuses a validated artifact from another trusted run for the same
+     source commit.
+   - **Artifact irretrievably lost (expired/missing) while the version is
+     partially or fully on PyPI**: there is NO automatic safe recovery. This
+     requires manual owner intervention (e.g. deleting the project release
+     on PyPI by hand after a careful review, then re-releasing). Never delete
+     or reuse published filenames from automation, and never substitute a
+     rebuilt artifact for published original files.
+   SELECTED version, publication fails closed with recovery guidance —
+   originals are never silently rebuilt. Rebuilding that version is only
+   allowed while it has no files on PyPI at all (e.g. the first attempt of
+   this release). Older published versions never block a new release; the
+   gate uses the version JSON endpoint scoped to the selected version and
+   distinguishes "project not on PyPI" and "version not published" 404s from
+   transport errors (unknown PyPI state also fails closed).
 3. **Publication** (`pypi-publish` job): re-downloads the same-run immutable
    artifact, re-verifies provenance and manifest, classifies against PyPI
    (read-only JSON API): missing → staged for upload; identical sha256 →

@@ -165,16 +165,24 @@ jobs:
           fi
           python scripts/verify_validated_build.py --dir dist --tag "$RELEASE_TAG" \
             --version "$RELEASE_VERSION" --sha "$SOURCE_SHA" --built-by-run "$REUSED_RUN"
-      - name: Rebuilding originals is only allowed while PyPI has no release files
+      - name: Rebuilding this version is only allowed while it has no PyPI files
         if: steps.decide.outputs.reused != 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.validate-source.outputs.version }}
         run: |
           set +e
-          python scripts/pypi_preflight.py --check-files-exist
+          # N6: version-scoped gate — older published versions never block a
+          # new release; exit 4 (unknown PyPI state) also fails closed.
+          python scripts/pypi_preflight.py --check-files-exist --version "${RELEASE_VERSION}"
           code=$?
           set -e
           if [ "$code" = 0 ]; then
-            echo "::error::PyPI already has release files but no validated artifact for source ${{ steps.prepub.outputs.sha }} was found; refusing to rebuild originals."
-            echo "::error::Recovery: locate the original publish run (Actions -> 'Publish to PyPI' history for tag $RELEASE_TAG), re-run its failed build job, then re-dispatch publish with the same tag/version."
+            echo "::error::PyPI already has files for version ${RELEASE_VERSION} but no validated artifact for source ${{ steps.prepub.outputs.sha }} was found; refusing to rebuild."
+            echo "::error::Recovery: re-run the failed PUBLISH job of the original run (its retained artifact is reused), or re-dispatch publish with the same tag/version to reuse a validated artifact from another trusted run. If the original artifact is irretrievably lost, manual owner intervention is required — never delete or reuse published filenames."
+            exit 1
+          fi
+          if [ "$code" != 1 ]; then
+            echo "::error::could not determine PyPI state for ${RELEASE_VERSION} (exit $code); refusing to rebuild on unknown state."
             exit 1
           fi
       - name: Build and fully validate the selected source
@@ -205,6 +213,7 @@ jobs:
           name: release-dists-${{ steps.prepub.outputs.sha }}
           path: dist/
           if-no-files-found: error
+          retention-days: 90 # the supported maximum; retain offline originals for longer needs
 
   pypi-publish:
     runs-on: ubuntu-latest

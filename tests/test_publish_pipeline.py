@@ -15,6 +15,8 @@ Covers the third-repair-round requirements:
 import hashlib
 import json
 
+import pytest
+
 import find_validated_build as fv
 import pypi_preflight as pp
 import verify_assets as va
@@ -352,8 +354,12 @@ class TestPublishDecisionSequence:
     """End-to-end simulated decision sequence of publish.yml's build job."""
 
     @staticmethod
-    def _decide(monkeypatch, fake, tmp_path, *, pypi_files=None, current_run=999):
-        """Replicates the workflow step logic: find reuse -> verify -> preflight."""
+    def _decide(monkeypatch, fake, tmp_path, *, selected_version_files=None, current_run=999):
+        """Replicates the workflow step logic: find reuse -> verify -> preflight.
+
+        selected_version_files models files ALREADY ON PYPI FOR THE SELECTED
+        VERSION (N6: other published versions are irrelevant to the gate).
+        """
         install_fake_api(monkeypatch, fake)
         steps = {}
         code = fv.main_args("--sha", SHA, "--tag", TAG, "--exclude-run", str(current_run))
@@ -383,15 +389,17 @@ class TestPublishDecisionSequence:
                 == 0
             )
             steps["outcome"] = "reuse"
-            monkey_upstream(pp, pypi_files or {})
+            monkey_upstream(pp, selected_version_files or {})
             staging = tmp_path / "staging"
             steps["preflight_rc"] = pp.cmd_check(ns(str(dist), str(staging)))
             steps["staged"] = sorted(p.name for p in staging.iterdir())
             return steps
-        # no reuse candidate: fresh build only allowed when PyPI is empty
-        monkey_upstream(pp, pypi_files or {})
-        has_files = pp.project_has_files("utec-client")
-        steps["outcome"] = "fail-closed-rebuild-denied" if has_files else "fresh-build"
+        # no reuse candidate: fresh build only allowed while the SELECTED
+        # version has no PyPI files (N6 version-scoped gate)
+        if selected_version_files:
+            steps["outcome"] = "fail-closed-rebuild-denied"
+        else:
+            steps["outcome"] = "fresh-build"
         return steps
 
     def test_human_older_tag_main_advanced_failed_publish_then_retry_reuses(
@@ -417,7 +425,7 @@ class TestPublishDecisionSequence:
             monkeypatch,
             fake,
             tmp_path,
-            pypi_files={
+            selected_version_files={
                 wheel: {"digests": {"sha256": wheel_digest}},
             },
         )
@@ -464,7 +472,7 @@ class TestPublishDecisionSequence:
             monkeypatch,
             fake,
             tmp_path,
-            pypi_files={
+            selected_version_files={
                 "utec_client-1.0.0-py3-none-any.whl": {"digests": {"sha256": "0" * 64}},
             },
         )
@@ -485,7 +493,7 @@ class TestPublishDecisionSequence:
             monkeypatch,
             fake,
             tmp_path,
-            pypi_files={
+            selected_version_files={
                 "utec_client-1.0.0.tar.gz": {"digests": {"sha256": "0" * 64}},
             },
         )
@@ -497,15 +505,137 @@ class TestPublishDecisionSequence:
         result = self._decide(monkeypatch, fake, tmp_path)
         assert result["outcome"] == "fresh-build"
 
+    def test_baseline_published_later_version_fresh_build_allowed(self, tmp_path, monkeypatch):
+        """N6 regression: a successful baseline (v1.0.0 fully published) never
+        blocks a fresh build/release of the NEXT version (v1.1.0) with no
+        files of its own on PyPI, even when reuse is unavailable."""
+        fake = FakeEnvelopeAPI()
+        fake.add(
+            "repos/geofffranks/utec-py/actions/runs",
+            [trusted_run(11, head_branch="feature", num=11)],
+        )
+        result = self._decide(
+            monkeypatch,
+            fake,
+            tmp_path,
+            selected_version_files={},  # v1.1.0 has no files; baseline v1.0.0 exists out of band
+        )
+        assert result["outcome"] == "fresh-build"
+
+    def test_partial_selected_version_retry_reuse_preferred(self, tmp_path, monkeypatch):
+        """N7: with partial files of the selected version, a retained
+        validated artifact is reused (never a rebuild)."""
+        fake = FakeEnvelopeAPI()
+        fake.add("repos/geofffranks/utec-py/actions/runs", [trusted_run(42, num=42)])
+        fake.add(
+            "repos/geofffranks/utec-py/actions/runs/42/jobs",
+            [{"name": "build", "conclusion": "success"}],
+        )
+        fake.add(
+            "repos/geofffranks/utec-py/actions/runs/42/artifacts",
+            [{"name": ARTIFACT, "expired": False}],
+        )
+        # partial upload: the wheel is already on PyPI with its identical hash
+        wheel_digest = hashlib.sha256(f"wheel-bytes-{VERSION}".encode()).hexdigest()
+        result = self._decide(
+            monkeypatch,
+            fake,
+            tmp_path,
+            selected_version_files={
+                f"utec_client-{VERSION}-py3-none-any.whl": {"digests": {"sha256": wheel_digest}},
+            },
+        )
+        assert result["outcome"] == "reuse"
+        assert result["verified"] is True
+        assert result["preflight_rc"] == 0  # only the missing sdist staged
+
+    def test_missing_artifact_partial_selected_version_fails_closed(self, tmp_path, monkeypatch):
+        """N7: artifact missing while the selected version is partially on
+        PyPI -> no reuse and no rebuild: fail closed."""
+        fake = FakeEnvelopeAPI()
+        fake.add("repos/geofffranks/utec-py/actions/runs", [trusted_run(42, num=42)])
+        fake.add(
+            "repos/geofffranks/utec-py/actions/runs/42/jobs",
+            [{"name": "build", "conclusion": "success"}],
+        )
+        fake.add("repos/geofffranks/utec-py/actions/runs/42/artifacts", [])
+        result = self._decide(
+            monkeypatch,
+            fake,
+            tmp_path,
+            selected_version_files={
+                "utec_client-1.0.0-py3-none-any.whl": {"digests": {"sha256": "0" * 64}},
+            },
+        )
+        # no candidate (exit 1) + selected version has files -> rebuild denied
+        assert result["outcome"] == "fail-closed-rebuild-denied"
+
 
 class TestCheckFilesExist:
-    def test_has_files(self, monkeypatch):
-        monkey_upstream(pp, {"a.whl": {"digests": {"sha256": "0" * 64}}})
-        assert pp.main(["--check-files-exist"]) == 0
+    """N6: the rebuild gate is scoped to the SELECTED version's files."""
 
-    def test_no_files(self, monkeypatch):
-        monkey_upstream(pp, {})
-        assert pp.main(["--check-files-exist"]) == 1
+    @staticmethod
+    def _patch_version(monkeypatch, version_payload, project_payload=None):
+        calls = []
+
+        def fake_version(project, version):
+            calls.append(("version", project, version))
+            return version_payload
+
+        def fake_project(project):
+            calls.append(("project", project))
+            return project_payload
+
+        monkeypatch.setattr(pp, "fetch_pypi_version", fake_version)
+        monkeypatch.setattr(pp, "fetch_pypi", fake_project)
+        return calls
+
+    def test_version_published_with_files(self, monkeypatch, capsys):
+        self._patch_version(monkeypatch, {"urls": [{"filename": "x.whl"}]})
+        assert pp.main(["--check-files-exist", "--version", VERSION]) == 0
+        assert json.loads(capsys.readouterr().out)["has_files"] is True
+
+    def test_version_published_without_files(self, monkeypatch, capsys):
+        self._patch_version(monkeypatch, {"urls": []})
+        assert pp.main(["--check-files-exist", "--version", VERSION]) == 1
+
+    def test_version_404_project_present(self, monkeypatch, capsys):
+        self._patch_version(monkeypatch, None, project_payload={"urls": [{"filename": "old.whl"}]})
+        assert pp.main(["--check-files-exist", "--version", "9.9.9"]) == 1
+        out = json.loads(capsys.readouterr().out)
+        assert out["detail"] == "version-not-published"
+        # the old published version's files did NOT block the decision
+        assert out["has_files"] is False
+
+    def test_project_404(self, monkeypatch, capsys):
+
+        self._patch_version(monkeypatch, None)
+
+        def fake_project(project):
+            raise pp.urllib.error.HTTPError("u", 404, "nf", None, None)
+
+        monkeypatch.setattr(pp, "fetch_pypi", fake_project)
+        assert pp.main(["--check-files-exist", "--version", "9.9.9"]) == 1
+        assert json.loads(capsys.readouterr().out)["detail"] == "project-not-on-pypi"
+
+    def test_unknown_state_fails_closed(self, monkeypatch, capsys):
+
+        def fake_version(project, version):
+            raise pp.urllib.error.HTTPError("u", 500, "boom", None, None)
+
+        monkeypatch.setattr(pp, "fetch_pypi_version", fake_version)
+        assert pp.main(["--check-files-exist", "--version", VERSION]) == 4
+
+    def test_version_is_required(self):
+        with pytest.raises(SystemExit):
+            pp.main(["--check-files-exist"])
+
+    def test_fetch_pypi_version_404_is_none(self, monkeypatch):
+        def fake_urlopen(url, timeout):
+            raise pp.urllib.error.HTTPError(url, 404, "nf", None, None)
+
+        monkeypatch.setattr(pp.urllib.request, "urlopen", fake_urlopen)
+        assert pp.fetch_pypi_version("utec-client", "9.9.9") is None
 
 
 def ns(dist, staging=None):
