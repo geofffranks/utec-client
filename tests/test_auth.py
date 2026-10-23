@@ -72,3 +72,21 @@ async def test_mixed_case_caller_authorization_is_replaced_once():
             assert auth_values == ["Bearer tok-123"]
             assert headers["X-Request-Id"] == "req-42"
             assert caller_headers == {"Authorization": "other-token", "X-Request-Id": "req-42"}
+
+
+@pytest.mark.asyncio
+async def test_mixed_case_caller_json_headers_are_replaced_once():
+    async with aiohttp.ClientSession() as session:
+        auth = _FakeAuth(session)
+        caller_headers = {"content-type": "text/plain", "ACCEPT": "text/html"}
+        with aioresponses() as mock:
+            mock.post("https://example.test/api", payload={})
+            await auth.async_make_auth_request(
+                "POST", "https://example.test/api", headers=caller_headers
+            )
+            call = mock.requests[("POST", __import__("yarl").URL("https://example.test/api"))][0]
+            headers = call.kwargs["headers"]
+            for name in ("content-type", "accept"):
+                values = [value for key, value in headers.items() if key.lower() == name]
+                assert values == ["application/json"]
+            assert caller_headers == {"content-type": "text/plain", "ACCEPT": "text/html"}

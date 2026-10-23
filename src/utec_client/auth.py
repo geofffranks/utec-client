@@ -27,7 +27,7 @@ class AbstractAuth(ABC):
         if headers := kwargs.pop("headers", {}):
             headers = {
                 name: value for name, value in headers.items()
-                if name.lower() != "authorization"
+                if name.lower() not in {"authorization", "content-type", "accept"}
             }
 
         headers.update(
