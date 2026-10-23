@@ -2,6 +2,7 @@
 
 from utec_client.devices.device_const import (
     HANDLE_TYPE_CAPABILITIES,
+    DeviceAttributes,
     DeviceCategory,
     DeviceCommand,
     HandleType,
@@ -28,6 +29,15 @@ def test_device_command_with_args():
         arguments={"level": 50},
     )
     assert cmd.arguments == {"level": 50}
+
+
+def test_device_attributes_parse_color_temperature_range():
+    attributes = DeviceAttributes.from_dict(
+        {"colorTemperatureRange": {"min": 2000, "max": 9000}}
+    )
+    assert attributes.color_temp_range is not None
+    assert (attributes.color_temp_range.min, attributes.color_temp_range.max) == (2000, 9000)
+    assert attributes.color_temp_range.step == 1
 
 
 def test_handle_type_enum_has_values():
