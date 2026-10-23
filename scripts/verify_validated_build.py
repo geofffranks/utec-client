@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     # ADV10: producer run ID validation — the artifact must have been built by
     # the trusted run that reuse was located from, and the ID must be sane.
     built_by_run = provenance.get("built_by_run")
-    if not isinstance(built_by_run, int) or built_by_run <= 0:
+    if type(built_by_run) is not int or built_by_run <= 0:
         print(
             f"::error::provenance built_by_run is not a valid run ID: {built_by_run!r}",
             file=sys.stderr,

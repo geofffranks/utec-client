@@ -312,6 +312,10 @@ class TestVerifyValidatedBuild:
         dist = self._ok(tmp_path)
         assert vvb.main(self._args(dist, built_by_run=999)) == 1
 
+    def test_boolean_producer_run_id_refused(self, tmp_path):
+        dist = self._ok(tmp_path, built_by_run=True)
+        assert vvb.main(self._args(dist, built_by_run=1)) == 1
+
     def test_provenance_missing_run_id_refused(self, tmp_path):
         dist = self._ok(tmp_path)
         data = json.loads((dist / "PROVENANCE.json").read_text())
