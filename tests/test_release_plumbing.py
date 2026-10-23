@@ -338,6 +338,14 @@ class TestVerifyAssets:
         self._manifest(dist, ["a.whl", "b.tar.gz"])
         assert va.main(["--dir", str(dist), "--manifest", str(dist / "SHA256SUMS")]) == 0
 
+    def test_duplicate_manifest_entry_with_conflicting_digest_fails(self, tmp_path):
+        import verify_assets as va
+
+        dist = self._write(tmp_path, {"a.whl": b"aaa"})
+        digest = hashlib.sha256(b"aaa").hexdigest()
+        (dist / "SHA256SUMS").write_text(f"{'0' * 64}  a.whl\n{digest}  a.whl\n")
+        assert va.main(["--dir", str(dist), "--manifest", str(dist / "SHA256SUMS")]) == 1
+
     def test_digest_mismatch_fails(self, tmp_path):
         import verify_assets as va
 
