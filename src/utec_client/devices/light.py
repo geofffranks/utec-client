@@ -41,7 +41,7 @@ class Light(BaseDevice):
     def rgb_color(self) -> tuple[int, int, int] | None:
         """Get RGB color."""
         color_data = self._get_state_value(DeviceCapability.COLOR, "color")
-        if color_data:
+        if isinstance(color_data, dict):
             color = ColorState.from_dict(color_data)
             return (color.r, color.g, color.b)
         return None
