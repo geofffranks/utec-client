@@ -227,6 +227,29 @@ async def test_async_create_request_accepts_none_parameters():
         assert req["payload"] is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 201, 202, 204, 400])
+async def test_response_release_is_synchronous_and_preserves_outcome(status):
+    """A synchronous aiohttp release must not mask a result or HTTP error."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    auth = MagicMock()
+    response = MagicMock()
+    response.status = status
+    response.json = AsyncMock(return_value={"ok": True})
+    response.text = AsyncMock(return_value="bad request")
+    response.release.return_value = None  # aiohttp.ClientResponse.release is synchronous
+    auth.async_make_auth_request = AsyncMock(return_value=response)
+    api = UHomeApi(auth)
+    if status == 400:
+        with pytest.raises(ApiError) as exc:
+            await api._async_make_request()
+        assert exc.value.status_code == 400
+    else:
+        assert await api._async_make_request() == ({} if status == 204 else {"ok": True})
+    response.release.assert_called_once_with()
+
+
 # --- Transport error surface ---
 
 
