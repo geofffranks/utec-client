@@ -241,7 +241,9 @@ class BaseDevice:
 
     async def update_state_data(self, push_data: dict) -> dict[str, Any] | None:
         """Update device data from push data"""
-        if "states" in push_data:
+        if isinstance(push_data.get("states"), list) and all(
+            isinstance(state, dict) for state in push_data["states"]
+        ):
             self._state_data = push_data
             logger.debug("Updated device %s with push data: %s", self.device_id, push_data)
             self._last_update = datetime.now()

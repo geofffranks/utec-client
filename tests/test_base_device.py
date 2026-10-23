@@ -202,6 +202,20 @@ async def test_update_state_data_warns_and_skips_malformed(discovery_dict, mock_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad_states", [None, 1, "broken", {"unexpected": "value"}, [None]])
+async def test_malformed_push_preserves_last_valid_state(discovery_dict, mock_api, bad_states):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    await dev.update_state_data(good)
+    await dev.update_state_data({"id": "dev-1", "states": bad_states})
+    assert dev.available is True
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+
+
+@pytest.mark.asyncio
 async def test_send_command_delegates_to_api(discovery_dict, mock_api):
     from utec_client.devices.device_const import DeviceCommand
 
