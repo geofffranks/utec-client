@@ -183,6 +183,24 @@ async def test_update_noop_when_no_devices_in_payload(discovery_dict, mock_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad_states", [None, 1, "broken", [None]])
+async def test_malformed_query_preserves_last_valid_state(discovery_dict, mock_api, bad_states):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    mock_api.query_device.return_value = {"payload": {"devices": [good]}}
+    await dev.update()
+    mock_api.query_device.return_value = {
+        "payload": {"devices": [{"id": "dev-1", "states": bad_states}]}
+    }
+    await dev.update()
+    assert dev.available is True
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+
+
+@pytest.mark.asyncio
 async def test_update_state_data_accepts_push_shape(discovery_dict, mock_api):
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     push = {

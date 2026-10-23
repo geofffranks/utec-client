@@ -228,7 +228,15 @@ class BaseDevice:
             if response and "payload" in response:
                 devices = response["payload"].get("devices", [])
                 if devices:
-                    self._state_data = devices[0]
+                    candidate = devices[0]
+                    if not isinstance(candidate, dict) or not isinstance(
+                        candidate.get("states"), list
+                    ) or not all(isinstance(state, dict) for state in candidate["states"]):
+                        logger.warning(
+                            "Invalid query data format for device %s: %s", self.device_id, candidate
+                        )
+                        return
+                    self._state_data = candidate
                     logger.debug(
                         "Updated device %s with data: %s",
                         self.device_id,
