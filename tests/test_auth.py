@@ -52,3 +52,18 @@ async def test_caller_headers_preserved_and_auth_overrides_nothing_except_auth_t
             headers = call.kwargs["headers"]
             assert headers["X-Request-Id"] == "req-42"
             assert headers["authorization"] == "Bearer tok-123"
+
+
+@pytest.mark.asyncio
+async def test_empty_caller_headers_are_not_modified():
+    async with aiohttp.ClientSession() as session:
+        auth = _FakeAuth(session)
+        caller_headers = {}
+        with aioresponses() as mock:
+            mock.post("https://example.test/api", payload={})
+            await auth.async_make_auth_request(
+                "POST", "https://example.test/api", headers=caller_headers
+            )
+            call = mock.requests[("POST", __import__("yarl").URL("https://example.test/api"))][0]
+            assert call.kwargs["headers"]["authorization"] == "Bearer tok-123"
+            assert caller_headers == {}
