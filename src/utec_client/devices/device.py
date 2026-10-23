@@ -32,6 +32,20 @@ class DeviceInfo:
         )
 
 
+def _valid_state_snapshot(data: Any) -> bool:
+    """Check the state fields used as mapping keys before storing a snapshot."""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("states"), list)
+        and all(
+            isinstance(state, dict)
+            and isinstance(state.get("capability"), str)
+            and isinstance(state.get("name"), str)
+            for state in data["states"]
+        )
+    )
+
+
 class BaseDevice:
     """Base class for all U-Home devices."""
 
@@ -229,9 +243,7 @@ class BaseDevice:
                 devices = response["payload"].get("devices", [])
                 if devices:
                     candidate = devices[0]
-                    if not isinstance(candidate, dict) or not isinstance(
-                        candidate.get("states"), list
-                    ) or not all(isinstance(state, dict) for state in candidate["states"]):
+                    if not _valid_state_snapshot(candidate):
                         logger.warning(
                             "Invalid query data format for device %s: %s", self.device_id, candidate
                         )
@@ -249,9 +261,7 @@ class BaseDevice:
 
     async def update_state_data(self, push_data: dict) -> dict[str, Any] | None:
         """Update device data from push data"""
-        if isinstance(push_data.get("states"), list) and all(
-            isinstance(state, dict) for state in push_data["states"]
-        ):
+        if _valid_state_snapshot(push_data):
             self._state_data = push_data
             logger.debug("Updated device %s with push data: %s", self.device_id, push_data)
             self._last_update = datetime.now()

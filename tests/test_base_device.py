@@ -234,6 +234,30 @@ async def test_malformed_push_preserves_last_valid_state(discovery_dict, mock_ap
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["push", "query"])
+@pytest.mark.parametrize("field", ["capability", "name"])
+async def test_unhashable_state_field_cannot_break_state_reads(
+    discovery_dict, mock_api, transport, field
+):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    await dev.update_state_data(good)
+    bad_entry = {"capability": "st.switch", "name": "switch", "value": "on"}
+    bad_entry[field] = ["unhashable"]
+    bad = {"id": "dev-1", "states": [bad_entry]}
+    if transport == "push":
+        await dev.update_state_data(bad)
+    else:
+        mock_api.query_device.return_value = {"payload": {"devices": [bad]}}
+        await dev.update()
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+    assert dev.available is True
+
+
+@pytest.mark.asyncio
 async def test_send_command_delegates_to_api(discovery_dict, mock_api):
     from utec_client.devices.device_const import DeviceCommand
 
