@@ -196,7 +196,14 @@ def cmd_check_files_exist(args: argparse.Namespace) -> int:
             )
         )
         return 1
-    has_files = bool(data.get("urls"))
+    if not isinstance(data, dict) or not isinstance(data.get("urls"), list):
+        print(
+            f"::error::invalid PyPI version response for {args.project} {args.version}; "
+            "refusing to decide rebuild eligibility on unknown state",
+            file=sys.stderr,
+        )
+        return 4
+    has_files = bool(data["urls"])
     print(
         json.dumps(
             {

@@ -603,6 +603,11 @@ class TestCheckFilesExist:
         self._patch_version(monkeypatch, {"urls": []})
         assert pp.main(["--check-files-exist", "--version", VERSION]) == 1
 
+    @pytest.mark.parametrize("invalid", [None, False, 0, {}, "unknown"])
+    def test_malformed_version_file_list_fails_closed(self, monkeypatch, capsys, invalid):
+        self._patch_version(monkeypatch, {"urls": invalid})
+        assert pp.main(["--check-files-exist", "--version", VERSION]) == 4
+
     def test_version_404_project_present(self, monkeypatch, capsys):
         self._patch_version(monkeypatch, None, project_payload={"urls": [{"filename": "old.whl"}]})
         assert pp.main(["--check-files-exist", "--version", "9.9.9"]) == 1
