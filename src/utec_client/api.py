@@ -74,7 +74,7 @@ class UHomeApi:
                 logger.error(f"API error: {response.status} - {error_text}")
                 raise ApiError(response.status, error_text)
         finally:
-            await response.release()
+            response.release()
 
     async def validate_auth(self) -> bool:
         """Validate authentication by making a test request."""
