@@ -66,8 +66,8 @@ def gh_api_paginated(url: str) -> list[dict]:
             if key in envelope:  # an empty list is a valid page; don't fall through
                 batch = envelope[key]
                 break
-        if batch is None:
-            raise SystemExit(f"unexpected envelope for {url}: no items array")
+        if not isinstance(batch, list):
+            raise SystemExit(f"unexpected envelope for {url}: missing or invalid items array")
         items.extend(batch)
         if len(batch) < PER_PAGE:
             return items

@@ -149,6 +149,13 @@ class TestFindValidatedBuild:
         monkeypatch.setattr(fv, "PER_PAGE", 1)
         assert fv.main_args("--sha", SHA, "--tag", TAG, "--exclude-run", "999") == 0
 
+    @pytest.mark.parametrize("invalid", [None, False, 0, {}, "not-an-array"])
+    @pytest.mark.parametrize("field", ["workflow_runs", "jobs", "artifacts"])
+    def test_paginated_items_must_be_a_json_array(self, monkeypatch, field, invalid):
+        monkeypatch.setattr(fv, "gh_api", lambda url: {"total_count": 0, field: invalid})
+        with pytest.raises(SystemExit, match="items array"):
+            fv.gh_api_paginated("repos/example/actions/runs")
+
     def test_whole_run_cancelled_but_build_succeeded_reused(self, monkeypatch):
         fake = FakeEnvelopeAPI()
         fake.add(self._runs_url(), [trusted_run(7, num=7)])
