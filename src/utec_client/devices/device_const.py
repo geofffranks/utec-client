@@ -117,7 +117,7 @@ class ColorState:
 
 
 @dataclass
-class ColorTemperatureRange(int):
+class ColorTemperatureRange:
     """Represents color temperature range for lights."""
 
     min: int  # Minimum temperature in Kelvin
