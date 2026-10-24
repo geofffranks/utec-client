@@ -175,6 +175,12 @@ def test_rgb_color_property_none_when_no_state(light):
     assert light.rgb_color is None
 
 
+@pytest.mark.parametrize("color", [1, "red", [255, 0, 0], {}])
+def test_rgb_color_property_handles_malformed_api_value(light, color):
+    light._state_data = {"states": [{"capability": "st.color", "name": "color", "value": color}]}
+    assert light.rgb_color is None
+
+
 def test_supported_features_brightness(light):
     light._state_data = {
         "states": [

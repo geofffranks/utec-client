@@ -183,6 +183,24 @@ async def test_update_noop_when_no_devices_in_payload(discovery_dict, mock_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad_states", [None, 1, "broken", [None]])
+async def test_malformed_query_preserves_last_valid_state(discovery_dict, mock_api, bad_states):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    mock_api.query_device.return_value = {"payload": {"devices": [good]}}
+    await dev.update()
+    mock_api.query_device.return_value = {
+        "payload": {"devices": [{"id": "dev-1", "states": bad_states}]}
+    }
+    await dev.update()
+    assert dev.available is True
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+
+
+@pytest.mark.asyncio
 async def test_update_state_data_accepts_push_shape(discovery_dict, mock_api):
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     push = {
@@ -199,6 +217,44 @@ async def test_update_state_data_warns_and_skips_malformed(discovery_dict, mock_
     dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
     await dev.update_state_data({"id": "dev-1"})  # no "states"
     assert dev._state_data is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_states", [None, 1, "broken", {"unexpected": "value"}, [None]])
+async def test_malformed_push_preserves_last_valid_state(discovery_dict, mock_api, bad_states):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    await dev.update_state_data(good)
+    await dev.update_state_data({"id": "dev-1", "states": bad_states})
+    assert dev.available is True
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["push", "query"])
+@pytest.mark.parametrize("field", ["capability", "name"])
+async def test_unhashable_state_field_cannot_break_state_reads(
+    discovery_dict, mock_api, transport, field
+):
+    dev = BaseDevice(discovery_dict(handle_type="utec-switch"), mock_api)
+    good = {
+        "id": "dev-1",
+        "states": [{"capability": "st.healthCheck", "name": "status", "value": "Online"}],
+    }
+    await dev.update_state_data(good)
+    bad_entry = {"capability": "st.switch", "name": "switch", "value": "on"}
+    bad_entry[field] = ["unhashable"]
+    bad = {"id": "dev-1", "states": [bad_entry]}
+    if transport == "push":
+        await dev.update_state_data(bad)
+    else:
+        mock_api.query_device.return_value = {"payload": {"devices": [bad]}}
+        await dev.update()
+    assert dev.get_state_data() == {"st.healthCheck": {"status": "Online"}}
+    assert dev.available is True
 
 
 @pytest.mark.asyncio

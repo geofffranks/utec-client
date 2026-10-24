@@ -24,7 +24,11 @@ class AbstractAuth(ABC):
 
     async def async_make_auth_request(self, method, host: str, **kwargs) -> ClientResponse:
         """Performs authenticated request using the clientsession passed to the class init."""
-        headers = dict(kwargs.pop("headers", {}))
+        headers = {
+            name: value
+            for name, value in dict(kwargs.pop("headers", {})).items()
+            if name.lower() not in {"authorization", "content-type", "accept"}
+        }
 
         headers.update(
             {

@@ -47,6 +47,12 @@ def main(argv: list[str] | None = None) -> int:
         name = os.path.basename(name.strip().lstrip("*"))
         if name == os.path.basename(args.manifest):
             raise SystemExit(f"manifest must not list itself: {name}")
+        if name in expected:
+            print(
+                f"::error::asset verification: duplicate manifest entry: {name}",
+                file=sys.stderr,
+            )
+            return 1
         expected[name] = digest
 
     present = {
