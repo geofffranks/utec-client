@@ -84,7 +84,9 @@ def fetch_pypi(project: str) -> dict[str, dict]:
         if exc.code == 404:
             return {}  # project not on PyPI yet
         raise
-    return {u["filename"]: u for u in remote.get("urls", [])}
+    if not isinstance(remote, dict) or not isinstance(remote.get("urls"), list):
+        raise ValueError("invalid PyPI project response: expected an object with a urls array")
+    return {u["filename"]: u for u in remote["urls"]}
 
 
 def classify(local: dict[str, str], remote: dict[str, dict]) -> dict[str, list[str]]:
@@ -145,7 +147,12 @@ def fetch_pypi_version(project: str, version: str) -> dict | None:
         with urllib.request.urlopen(
             PYPI_VERSION_JSON.format(project=project, version=version), timeout=30
         ) as resp:
-            return json.load(resp)
+            data = json.load(resp)
+            if not isinstance(data, dict) or not isinstance(data.get("urls"), list):
+                raise ValueError(
+                    "invalid PyPI version response: expected an object with a urls array"
+                )
+            return data
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
@@ -303,7 +310,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_files_exist:
         if not args.version:
             parser.error("--check-files-exist requires --version")
-        return cmd_check_files_exist(args)
+        try:
+            return cmd_check_files_exist(args)
+        except Exception as exc:
+            # Only a confirmed absence may exit 1 in this mode. Operational
+            # failures (including unexpected ones) must not authorize a build.
+            # BaseException is intentionally not caught: interrupts still stop us.
+            print(
+                f"::error::cannot determine PyPI state for {args.project} {args.version}: "
+                f"{type(exc).__name__}: {exc}; refusing to decide rebuild eligibility "
+                "on unknown state",
+                file=sys.stderr,
+            )
+            return 4
     if args.verify_published:
         return cmd_verify_published(args)
     return cmd_check(args)

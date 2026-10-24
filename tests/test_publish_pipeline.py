@@ -111,6 +111,7 @@ class TestFindValidatedBuild:
                 trusted_run(42),
                 {
                     "id": 43,
+                    "run_number": 1,
                     "path": ".github/workflows/other.yml",
                     "event": "workflow_dispatch",
                     "head_branch": "main",
@@ -150,11 +151,10 @@ class TestFindValidatedBuild:
         assert fv.main_args("--sha", SHA, "--tag", TAG, "--exclude-run", "999") == 0
 
     @pytest.mark.parametrize("invalid", [None, False, 0, {}, "not-an-array"])
-    @pytest.mark.parametrize("field", ["workflow_runs", "jobs", "artifacts"])
-    def test_paginated_items_must_be_a_json_array(self, monkeypatch, field, invalid):
-        monkeypatch.setattr(fv, "gh_api", lambda url: {"total_count": 0, field: invalid})
-        with pytest.raises(SystemExit, match="items array"):
-            fv.gh_api_paginated("repos/example/actions/runs")
+    def test_paginated_items_must_be_a_json_array(self, monkeypatch, invalid):
+        monkeypatch.setattr(fv, "gh_api", lambda url: {"total_count": 0, "workflow_runs": invalid})
+        with pytest.raises(fv.DiscoveryError, match="workflow_runs"):
+            fv.gh_api_paginated("repos/example/actions/runs", "workflow_runs")
 
     def test_whole_run_cancelled_but_build_succeeded_reused(self, monkeypatch):
         fake = FakeEnvelopeAPI()
@@ -407,6 +407,10 @@ class TestPublishDecisionSequence:
             return steps
         # no reuse candidate: fresh build only allowed while the SELECTED
         # version has no PyPI files (N6 version-scoped gate)
+        if code != 1:
+            # The workflow fails closed on any other finder status (e.g. 4,
+            # unknown discovery state) instead of reading it as "no candidate".
+            return {"outcome": "fail-closed-undecided"}
         if selected_version_files:
             steps["outcome"] = "fail-closed-rebuild-denied"
         else:

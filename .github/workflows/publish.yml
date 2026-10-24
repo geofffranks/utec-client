@@ -16,7 +16,10 @@ name: Publish to PyPI
 #    files yet, the selected source is built and fully validated (lint,
 #    tests, build, clean-environment artifact checks); when PyPI already has
 #    files, a missing/unusable validated artifact fails closed instead of
-#    rebuilding originals. The artifact carries PROVENANCE.json (tag,
+#    rebuilding originals. Only finder exit 0 (reuse) and exit 1 (no
+#    candidate) produce outputs; exit 2 (unusable artifact) and 4 (unknown
+#    discovery state) fail the job before any output, so nothing downstream
+#    can act on an undecided reuse. The artifact carries PROVENANCE.json (tag,
 #    version, source commit, building run) + SHA256SUMS. Release assets are
 #    intentionally NOT uploaded: trust rests on the immutable workflow
 #    artifact plus its provenance binding.
@@ -133,12 +136,6 @@ jobs:
           OUT=$(python scripts/find_validated_build.py --sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --exclude-run "$CURRENT_RUN")
           code=$?
           set -e
-          if [ "$code" = 2 ]; then
-            # Trusted run found but artifact missing/expired: fail closed here
-            # too (before any rebuild decision) with the actionable guidance
-            # the finder already printed.
-            exit 1
-          fi
           if [ "$code" = 0 ]; then
             REUSED_RUN=$(echo "$OUT" | awk '{print $1}')
             ARTIFACT=$(echo "$OUT" | awk '{print $2}')
@@ -146,9 +143,18 @@ jobs:
             echo "reused_run_id=$REUSED_RUN" >> "$GITHUB_OUTPUT"
             echo "artifact_name=$ARTIFACT" >> "$GITHUB_OUTPUT"
             echo "built_by_run=$REUSED_RUN" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "$code" = 1 ]; then
+            # Completed scan, no reusable candidate: only this status lets the
+            # gated rebuild path decide (it independently checks PyPI state).
             echo "reused=false" >> "$GITHUB_OUTPUT"
             echo "built_by_run=$CURRENT_RUN" >> "$GITHUB_OUTPUT"
+          else
+            # 2 (artifact expired/unusable) or 4 (unknown discovery state:
+            # API/JSON/envelope/pagination failure): fail closed BEFORE any
+            # outputs, so no downstream step can act on an undecided reuse.
+            # The finder already printed actionable recovery guidance.
+            echo "::error::validated-build discovery failed with exit $code; failing closed before any reuse decision."
+            exit 1
           fi
       - name: Reuse prior validated build artifact
         if: steps.decide.outputs.reused == 'true'
