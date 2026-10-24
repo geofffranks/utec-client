@@ -229,8 +229,13 @@ async def test_async_create_request_accepts_none_parameters():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [200, 201, 202, 204, 400])
-async def test_response_release_is_synchronous_and_preserves_outcome(status):
-    """A synchronous aiohttp release must not mask a result or HTTP error."""
+async def test_response_release_preserves_outcome(status):
+    """Release must not mask a result or HTTP error.
+
+    What aiohttp's ``release()`` actually returns and does is pinned by the
+    real-response tests in test_response_release.py; this keeps a cheap
+    unit-level outcome check.
+    """
     from unittest.mock import AsyncMock, MagicMock
 
     auth = MagicMock()
@@ -238,7 +243,6 @@ async def test_response_release_is_synchronous_and_preserves_outcome(status):
     response.status = status
     response.json = AsyncMock(return_value={"ok": True})
     response.text = AsyncMock(return_value="bad request")
-    response.release.return_value = None  # aiohttp.ClientResponse.release is synchronous
     auth.async_make_auth_request = AsyncMock(return_value=response)
     api = UHomeApi(auth)
     if status == 400:
