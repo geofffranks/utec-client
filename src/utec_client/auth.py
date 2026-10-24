@@ -26,7 +26,7 @@ class AbstractAuth(ABC):
         """Performs authenticated request using the clientsession passed to the class init."""
         if headers := kwargs.pop("headers", {}):
             headers = {
-                name: value for name, value in headers.items()
+                name: value for name, value in dict(headers).items()
                 if name.lower() not in {"authorization", "content-type", "accept"}
             }
 
