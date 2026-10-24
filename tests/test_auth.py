@@ -55,14 +55,31 @@ async def test_caller_headers_preserved_and_auth_overrides_nothing_except_auth_t
 
 
 @pytest.mark.asyncio
+async def test_empty_caller_headers_are_not_modified():
+    async with aiohttp.ClientSession() as session:
+        auth = _FakeAuth(session)
+        caller_headers = {}
+        with aioresponses() as mock:
+            mock.post("https://example.test/api", payload={})
+            await auth.async_make_auth_request(
+                "POST", "https://example.test/api", headers=caller_headers
+            )
+            call = mock.requests[("POST", __import__("yarl").URL("https://example.test/api"))][0]
+            assert call.kwargs["headers"]["authorization"] == "Bearer tok-123"
+            assert caller_headers == {}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("container", [list, tuple])
 async def test_header_pair_iterables_preserve_custom_headers_and_replace_reserved(container):
-    caller_headers = container([
-        ("X-Request-Id", "req-42"),
-        ("Authorization", "old-token"),
-        ("content-type", "text/plain"),
-        ("ACCEPT", "text/html"),
-    ])
+    caller_headers = container(
+        [
+            ("X-Request-Id", "req-42"),
+            ("Authorization", "old-token"),
+            ("content-type", "text/plain"),
+            ("ACCEPT", "text/html"),
+        ]
+    )
     original = container(caller_headers)
     async with aiohttp.ClientSession() as session:
         auth = _FakeAuth(session)
