@@ -48,6 +48,10 @@ Device info is organized with minimal change from the raw API response
 integration downstream. Locks are the most fully supported device type;
 switches and lights have limited functionality.
 
+Lock door sensors accept both `doorState` (including U-Bolt-Pro-WiFi payloads)
+and legacy `sensorState` attributes under `st.DoorSensor` or `st.doorSensor`.
+When both attributes supply nonempty values, `doorState` takes precedence.
+
 ## Development
 
 Requires Python 3.11–3.14.
