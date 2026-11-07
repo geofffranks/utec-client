@@ -42,8 +42,13 @@ class Lock(BaseDevice):
         """Get the door state if door sensor is present."""
         if not self.has_door_sensor:
             return None
-        door_state = self._get_state_value(DeviceCapability.DOOR_SENSOR, "sensorState")
-        return door_state or self._get_state_value("st.doorSensor", "sensorState")
+        # Prefer doorState across capability spellings, retaining legacy falsey fallback.
+        return (
+            self._get_state_value(DeviceCapability.DOOR_SENSOR, "doorState")
+            or self._get_state_value("st.doorSensor", "doorState")
+            or self._get_state_value(DeviceCapability.DOOR_SENSOR, "sensorState")
+            or self._get_state_value("st.doorSensor", "sensorState")
+        )
 
     @property
     def lock_mode(self) -> str | None:

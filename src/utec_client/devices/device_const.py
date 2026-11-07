@@ -61,7 +61,7 @@ class LockMode(IntEnum):
 
 
 class DoorState(str, Enum):
-    """Door state values from API (st.doorSensor / sensorState attribute)."""
+    """Door state values from API doorState or legacy sensorState attributes."""
 
     CLOSED = "Closed"
     OPEN = "Open"
